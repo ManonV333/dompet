@@ -23,7 +23,7 @@ export const WEEK_CATS = ['leisure', 'shopping', 'other'];
 export const SUGGESTIONS = {
   food: ['Warung', 'Restaurant', 'Café', 'Smoothie bowl', 'GoFood', 'Street food', 'Petit-déj'],
   groceries: ['Supermarché', 'Eau', 'Fruits', 'Snacks', 'Pepito'],
-  transport: ['Grab', 'Gojek', 'Location scooter', 'Essence', 'Bateau / ferry', 'Vol', 'Parking'],
+  transport: ['Grab', 'Gojek', 'Bluebird', 'Navette', 'Bateau / ferry'],
   leisure: ['Massage', 'Salle de sport', 'Yoga', 'Surf', 'Beach club', 'Excursion', 'Bar'],
   shopping: ['Vêtements', 'Souvenirs', 'Cosmétiques', 'Accessoires'],
   tips: ['Pourboire', 'Offrande'],
@@ -54,13 +54,14 @@ export function emptyData() {
       split: { ...DEFAULT_SPLIT },
       mealsPerDay: 3,
       savings: { amount: null, date: null }, // cagnotte totale du voyage
-      cashStart: { date: null, amountIDR: 0 },
+      cashStart: { date: null, amountIDR: 0, amountEUR: 0 },
       timezone: 'Asia/Makassar',
     },
     expenses: [],
     stays: [],
     recurring: [],
     cash: [],
+    income: [], // rentrées d'argent : vente Vinted, chômage…
     deleted: {},
   };
 }
@@ -196,7 +197,9 @@ export function monthSummary(data, ym, today) {
   const dim = diffDays(first, last) + 1;
   const explicit = s.monthlyBudgets && s.monthlyBudgets[ym] != null;
   const prorated = !explicit && dim < fullDim;
-  const B = prorated ? budgetFor(data, ym) * dim / fullDim : budgetFor(data, ym);
+  // une rentrée marquée « à dépenser ce mois-ci » s'ajoute au budget du mois
+  const extra = (data.income || []).filter(x => x.toMonth && x.date >= first && x.date <= last).reduce((a, x) => a + toEUR(x.amount, x.currency, x.currency === 'EUR' ? 1 : (x.rate || s.rate)), 0);
+  const B = (prorated ? budgetFor(data, ym) * dim / fullDim : budgetFor(data, ym)) + extra;
   const lines = linesBetween(data, first, last).filter(l => !l.off);
   const fixedLines = lines.filter(l => l.fixed), varLines = lines.filter(l => !l.fixed);
   const fixed = sum(fixedLines);
@@ -286,7 +289,7 @@ export function monthSummary(data, ym, today) {
   }
 
   return {
-    ym, first, last, dim, fullDim, prorated, fullBudget: budgetFor(data, ym), state, today, budget: B, fixed, fixedStays, fixedRecurring, varBudget,
+    ym, first, last, dim, fullDim, prorated, fullBudget: budgetFor(data, ym), extra, state, today, budget: B, fixed, fixedStays, fixedRecurring, varBudget,
     spentBefore, spentToday, varSpent, committed: fixed + varSpent, remaining: B - fixed - varSpent,
     daysLeft, baseDaily, todayAllowance, remainingToday, tomorrowAllowance,
     avgRecent, avgMonth, projected, idealVarToDate, cats, mealAllowance, meals, days, lines, day,
@@ -321,23 +324,24 @@ export function staysCoverage(data) {
   return { stays, gaps, overlaps, nights, total, avgNight: nights ? total / nights : 0, start, end, tripNights: diffDays(start, end) };
 }
 
-// ---------- cash en poche ----------
+// ---------- billets dans le portefeuille (roupies ET euros) ----------
+// cashStart = { date, amountIDR, amountEUR } ; cash = retraits, échanges €→Rp, ajustements.
 export function cashBalance(data) {
-  const s = data.settings, rate = s.rate;
+  const s = data.settings;
   const start = s.cashStart && s.cashStart.date;
   if (!start) return null;
-  let bal = s.cashStart.amountIDR || 0;
+  let idr = s.cashStart.amountIDR || 0, eur = s.cashStart.amountEUR || 0;
   for (const c of data.cash) {
     if (c.date < start) continue;
-    if (c.type === 'withdraw') bal += c.amountIDR || 0;
-    if (c.type === 'adjust') bal += c.amountIDR || 0;
+    if (c.type === 'withdraw' || c.type === 'adjust') { idr += c.amountIDR || 0; eur += c.amountEUR || 0; }
+    if (c.type === 'exchange') { idr += c.amountIDR || 0; eur -= c.amountEUR || 0; }
   }
   for (const e of data.expenses) {
     if (e.pay !== 'cash' || e.date < start) continue;
     const tot = (e.amount || 0) + (e.tip || 0);
-    bal -= e.currency === 'IDR' ? tot : tot * rate;
+    if (e.currency === 'EUR') eur -= tot; else idr -= tot;
   }
-  return bal;
+  return { idr, eur };
 }
 
 // ---------- voyage complet ----------
@@ -354,7 +358,7 @@ export function tripSummary(data, today) {
 }
 
 // ---------- fusion (sync) ----------
-const COLS = ['expenses', 'stays', 'recurring', 'cash'];
+const COLS = ['expenses', 'stays', 'recurring', 'cash', 'income'];
 export function mergeData(a, b) {
   if (!a) return b; if (!b) return a;
   const out = { ...a, schema: 1 };
@@ -408,7 +412,8 @@ export function savingsSummary(data, today) {
   const lines = linesBetween(data, start, end);
   const spent = sum(lines);
   const days = Math.max(1, diffDays(start, end) + 1);
-  const remaining = sv.amount - spent;
+  const income = (data.income || []).filter(x => x.date >= start && x.date <= end).reduce((a, x) => a + toEUR(x.amount, x.currency, x.currency === 'EUR' ? 1 : (x.rate || s.rate)), 0);
+  const remaining = sv.amount + income - spent;
   // rythme réel (≥ 7 jours de données), sinon le budget mensuel
   const budgetDaily = s.defaultMonthlyBudget * 12 / 365;
   const realDaily = days >= 7 ? spent / days : null;
@@ -418,7 +423,7 @@ export function savingsSummary(data, today) {
   // engagements futurs déjà réservés (logements après aujourd'hui)
   const booked = sum(linesBetween(data, addDays(end, 1), '2099-12-31').filter(l => l.kind === 'stay'));
   const scen = [['faible', 690], ['ton budget', s.defaultMonthlyBudget], ['élevé', 990]].map(([k, m]) => ({ key: k, monthly: m, months: remaining / m }));
-  return { amount: sv.amount, start, spent, remaining, days, realDaily, budgetDaily, pace, monthsLeft: daysLeft / 30.44, endDate, booked, scenarios: scen, pct: spent / sv.amount };
+  return { amount: sv.amount, income, start, spent, remaining, days, realDaily, budgetDaily, pace, monthsLeft: daysLeft / 30.44, endDate, booked, scenarios: scen, pct: spent / (sv.amount + income) };
 }
 
 // ---------- bilan d'une semaine ----------

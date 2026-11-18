@@ -57,7 +57,7 @@ export function donut({ segs, size = 200, stroke = 26 }) {
 // Barres journalières + ligne « budget du jour ». days = [{label, value, limit, tip, highlight, muted}]
 export function dayBars({ days, height, W = 640, fmtAxis = v => v, color = 'var(--series-bar)', overColor = 'var(--crit)' }) {
   height = height || (W < 500 ? 220 : 200);
-  const H = height, padL = 44, padR = 8, padT = 12, padB = 26;
+  const H = height, padL = 64, padR = 8, padT = 12, padB = 26;
   const iw = W - padL - padR, ih = H - padT - padB;
   const max = Math.max(1, ...days.map(d => Math.max(d.value, d.limit || 0))) * 1.08;
   const step = iw / days.length, bw = Math.max(3, Math.min(18, step - 3));
@@ -93,7 +93,7 @@ export function niceTicks(max, n = 4) {
 // Courbe cumulée vs trajectoire idéale. pts=[{label, value|null, ideal, tip}]
 export function burnUp({ pts, budget, height, W = 640, fmtAxis = v => v }) {
   height = height || (W < 500 ? 220 : 200);
-  const H = height, padL = 44, padR = 12, padT = 14, padB = 26;
+  const H = height, padL = 64, padR = 12, padT = 14, padB = 26;
   const iw = W - padL - padR, ih = H - padT - padB;
   const max = Math.max(budget, ...pts.map(p => Math.max(p.value || 0, p.proj || 0))) * 1.08 || 1;
   const x = i => padL + (pts.length > 1 ? i / (pts.length - 1) : 0) * iw;

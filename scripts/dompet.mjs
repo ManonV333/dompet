@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Dompet — outil en ligne de commande utilisé par Claude pour alimenter data.json.
+// QQ — outil en ligne de commande utilisé par Claude pour alimenter data.json.
 //
 //   node scripts/dompet.mjs status                         → résumé du jour (heure de Bali)
 //   node scripts/dompet.mjs add '[{"label":"Warung","amount":"45k","cat":"food","pay":"cash"}]'
@@ -64,17 +64,22 @@ if (cmd === 'add') {
   save(D);
   added.forEach(e => console.log(`+ ${e.date}  ${CAT[e.cat].label} · ${e.label}  ${e.currency === 'IDR' ? idr(e.amount + e.tip) : eur(e.amount + e.tip)}  [${e.pay}]  id=${e.id}`));
 } else if (cmd === 'upsert') {
-  const col = args[1]; if (!['expenses', 'stays', 'recurring', 'cash'].includes(col)) { console.error('Collection : expenses | stays | recurring | cash'); process.exit(1); }
+  const col = args[1]; if (!['expenses', 'stays', 'recurring', 'cash', 'income'].includes(col)) { console.error('Collection : expenses | stays | recurring | cash | income'); process.exit(1); }
   const x = parseJSON(args[2]);
-  const cur = (x.currency || (col === 'recurring' ? 'EUR' : 'IDR')).toUpperCase();
+  const cur = (x.currency || (col === 'recurring' || col === 'income' ? 'EUR' : 'IDR')).toUpperCase();
   if (col === 'stays') { x.total = money(x.total, cur); x.currency = cur; if (cur === 'IDR') x.rate = x.rate || R; if (x.paid == null) x.paid = true; }
   if (col === 'recurring') { x.amount = money(x.amount, cur); x.currency = cur; x.freq = x.freq || 'monthly'; x.cat = x.cat || 'pro'; x.start = x.start || today; x.day = x.day || Number(x.start.slice(8)); }
   if (col === 'expenses' && x.amount != null) x.amount = money(x.amount, x.currency || 'IDR');
+  if (col === 'income') { x.amount = money(x.amount, cur); x.currency = cur; x.date = x.date || today; if (cur === 'IDR') x.rate = x.rate || R; }
   const it = upsert(col, x); save(D); console.log(`ok ${col} id=${it.id}`);
 } else if (cmd === 'withdraw') {
   const a = parseAmount(args[1], 'IDR'), fee = parseAmount(args[2] || '0', 'IDR') || 0;
   if (!D.settings.cashStart?.date) D.settings = { ...D.settings, cashStart: { date: today, amountIDR: 0 }, updatedAt: now() };
   const it = upsert('cash', { type: 'withdraw', date: args[3] || today, amountIDR: a, feeIDR: fee }); save(D); console.log(`ok retrait ${idr(a)} id=${it.id}`);
+} else if (cmd === 'exchange') {
+  // change d'euros en roupies : exchange <euros> <roupies reçues>
+  const e = parseAmount(args[1], 'EUR'), r = parseAmount(args[2], 'IDR');
+  const it = upsert('cash', { type: 'exchange', date: args[3] || today, amountEUR: e, amountIDR: r }); save(D); console.log(`ok change ${eur(e)} → ${idr(r)} id=${it.id}`);
 } else if (cmd === 'settings') {
   D.settings = { ...D.settings, ...parseJSON(args[1]), updatedAt: now() }; save(D); console.log('ok réglages');
 } else if (cmd === 'delete') {
@@ -93,7 +98,7 @@ if (cmd === 'add') {
   const cash = cashBalance(D);
   const sv = savingsSummary(D, today);
   const mois = (m) => m >= 1 ? `${Math.floor(m)} mois` : `${Math.round(m * 30)} jours`;
-  console.log(`Dompet — ${today} (${tz})  ·  fichier : ${dataPath}`);
+  console.log(`QQ — ${today} (${tz})  ·  fichier : ${dataPath}`);
   console.log(`Budget ${ymOf(today)} : ${eur(ms.budget)}${ms.prorated ? ' (prorata)' : ''}  ·  logements+fixes ${eur(ms.fixed)}  ·  quotidien dépensé ${eur(ms.varSpent)}  ·  reste ${eur(ms.remaining)}`);
   console.log(`Aujourd'hui (repas, courses, transport, pourboires) : budget ${both(dy.allowance)}, dépensé ${both(dy.spent)}, reste ${both(dy.remaining)}`);
   if (dy.tomorrow != null) console.log(`Demain : ${both(dy.tomorrow)}  (jour normal : ${both(dy.base)})`);
@@ -101,6 +106,6 @@ if (cmd === 'add') {
   for (const c of DAY_CATS) { const x = ms.cats[c]; if (x.pct) console.log(`  ${CAT[c].label.padEnd(22)} aujourd'hui ${idr(x.today * R).padStart(12)} / ${idr(Math.max(0, x.dailyAllowance) * R)}`); }
   console.log('Cette semaine :');
   for (const c of WEEK_CATS) { const x = ms.cats[c]; if (x.pct) console.log(`  ${CAT[c].label.padEnd(22)} ${idr(x.weekSpent * R).padStart(12)} / ${idr(Math.max(0, x.weekEnvelope) * R)}`); }
-  if (sv) console.log(`Cagnotte : ${eur(sv.remaining)} restent sur ${eur(sv.amount)} · ${eur(sv.spent)} dépensés en ${sv.days} j${sv.realDaily ? ` (${eur(sv.realDaily * 30.44)}/mois)` : ''} · tient ≈ ${mois(sv.monthsLeft)}${sv.endDate ? ` (→ ${sv.endDate.slice(0, 7)})` : ''}`);
-  if (cash != null) console.log(`Billets estimés : ${idr(cash)}`);
+  if (sv) console.log(`Cagnotte : ${eur(sv.remaining)} restent sur ${eur(sv.amount + sv.income)}${sv.income ? ` (dont ${eur(sv.income)} de rentrées)` : ''} · ${eur(sv.spent)} dépensés en ${sv.days} j${sv.realDaily ? ` (${eur(sv.realDaily * 30.44)}/mois)` : ''} · tient ≈ ${mois(sv.monthsLeft)}${sv.endDate ? ` (→ ${sv.endDate.slice(0, 7)})` : ''}`);
+  if (cash != null) console.log(`Billets estimés : ${idr(cash.idr)}${cash.eur ? ` + ${eur(cash.eur)} en billets euros` : ''}`);
 }

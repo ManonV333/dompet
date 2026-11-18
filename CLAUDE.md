@@ -1,6 +1,6 @@
-# Dompet — consignes pour Claude
+# QQ (dépôt « dompet ») — consignes pour Claude
 
-Dompet est le suivi de dépenses de voyage (Bali) de l'utilisatrice. Deux dépôts GitHub :
+QQ est le suivi de dépenses de voyage (Bali) de l'utilisatrice. Deux dépôts GitHub :
 
 - **`dompet`** (public, GitHub Pages) : ce code. Site statique, aucune étape de build.
 - **`dompet-data`** (privé) : un seul fichier `data.json` = toutes les données. Le site le lit/écrit via l'API GitHub avec une clé stockée sur son téléphone ; Claude l'écrit via git.
@@ -22,7 +22,9 @@ Quand elle raconte ce qu'elle a acheté (« nasi goreng 35k, gojek 20k, massage 
 3. `node scripts/dompet.mjs status` → lui répondre avec : reste aujourd'hui, budget de demain, ≈ par repas, enveloppes de la semaine si concernées, alertes. Court et simple : elle ne veut pas réfléchir.
 4. `git -C ../dompet-data add data.json && git -C ../dompet-data commit -m "Dépenses du <date> (via Claude)" && git -C ../dompet-data push`.
 
-Autres commandes : `upsert stays '{"name","place","checkin","checkout","total","currency","paid"}'` (checkout = jour du départ, non compté) · `upsert recurring '{"label","amount","currency","freq":"monthly","day"}'` (abonnements, Google Ads : comptés automatiquement chaque mois, ne pas les ressaisir comme dépenses) · `withdraw <montant> <frais>` (retrait DAB, pas une dépense) · `settings '{...}'` · `list 3` · `delete expenses <id>` · `rate`.
+Rentrée d'argent (vente Vinted, chômage, remboursement) : `upsert income '{"label":"Vente Vinted","amount":25,"currency":"EUR","date":"…","toMonth":false}'`. Elle s'ajoute à la cagnotte ; `toMonth: true` l'ajoute aussi au budget du mois. Les 670 € de France Travail du départ sont déjà dans les 21 730 €.
+
+Autres commandes : `upsert stays '{"name","place","checkin","checkout","total","currency","paid"}'` (checkout = jour du départ, non compté) · `upsert recurring '{"label","amount","currency","freq":"monthly","day"}'` (abonnements Claude, iCloud : comptés automatiquement chaque mois, ne pas les ressaisir comme dépenses) · `withdraw <montant> <frais>` (retrait DAB, pas une dépense) · `exchange <euros> <roupies>` (billets euros changés en roupies) · `settings '{...}'` · `list 3` · `delete expenses <id>` · `rate`.
 
 ## Règles
 

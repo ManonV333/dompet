@@ -1,4 +1,4 @@
-// Dompet — interface
+// QQ — interface
 import {
   CATS, CAT, DAILY_CATS, DAY_CATS, WEEK_CATS, SUGGESTIONS, DEFAULT_SPLIT, monthSummary, staysCoverage, cashBalance, tripSummary, linesBetween,
   savingsSummary, parseQuick, guessCat,
@@ -18,10 +18,11 @@ const lsGet = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { r
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { } };
 
 const UI = {
-  view: lsGet('dompet:view', 'today'),
+  view: (v => v === 'settings' ? 'today' : v)(lsGet('dompet:view', 'today')),
   cur: lsGet('dompet:cur', 'IDR'),
   month: null,
   jFilter: 'all', jSearch: '',
+  info: null, statTab: 'days', prev: 'today',
 };
 const D = () => store.data;
 const rate = () => D().settings.rate || 18500;
@@ -43,15 +44,25 @@ const fixSp = f => ({ format: v => f.format(v).replace(/\u202f/g, '\u00a0') });
 const nf0 = fixSp(new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0, useGrouping: 'always' }));
 const nf2 = fixSp(new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const fmtEUR = (v, { round = false } = {}) => { const a = Math.abs(v); const s = (round || a >= 100) ? nf0.format(Math.round(a)) : nf2.format(a); return `${v < -0.004 ? '−' : ''}${s} €`; };
-const fmtIDR = (v, { exact = false } = {}) => { const r = exact ? Math.round(v) : Math.round(v / 1000) * 1000; return `${r < 0 ? '−' : ''}Rp ${nf0.format(Math.abs(r))}`; };
-const kIDR = v => { const a = Math.abs(v), sg = v < 0 ? '−' : ''; if (a >= 1e6) return `${sg}${(a / 1e6).toLocaleString('fr-FR', { maximumFractionDigits: 1 }).replace(/\u202f/g, '\u00a0')} jt`; if (a >= 1e3) return `${sg}${Math.round(a / 1e3)}k`; return `${sg}${Math.round(a)}`; };
+const fmtIDR = (v, { exact = false } = {}) => { const r = exact ? Math.round(v) : Math.round(v / 1000) * 1000; return `${r < 0 ? '−' : ''}Rp ${nf0.format(Math.abs(r))}`; };
+const kIDR = v => `${v < 0 ? '−' : ''}${nf0.format(Math.round(Math.abs(v) / 1000) * 1000)}`; // nombre complet, sans « k » ni « jt »
 function money(eur, opts = {}) {
   const idr = eur * rate();
-  return UI.cur === 'IDR' ? [opts.compact ? `Rp ${kIDR(idr)}` : fmtIDR(idr), fmtEUR(eur, opts)] : [fmtEUR(eur, opts), opts.compact ? `Rp ${kIDR(idr)}` : fmtIDR(idr)];
+  return UI.cur === 'IDR' ? [fmtIDR(idr), fmtEUR(eur, opts)] : [fmtEUR(eur, opts), fmtIDR(idr)];
 }
 const m1 = (eur, o) => money(eur, o)[0];
 const m2 = (eur, o) => money(eur, o)[1];
-const axisFmt = v => UI.cur === 'IDR' ? kIDR(v * rate()) : `${Math.round(v)} €`;
+// montant principal + l'autre devise en petit dessous
+const dual = (eur, o) => `${m1(eur, o)}<small class="alt">${m2(eur, o)}</small>`;
+// en roupies, personne ne paie 35 Rp : « 35 » veut dire 35 000 Rp
+const smartIDR = v => Number.isFinite(v) && v > 0 && v < 1000 ? v * 1000 : v;
+const amt = (raw, cur) => cur === 'IDR' ? smartIDR(parseAmount(raw, 'IDR')) : parseAmount(raw, cur);
+const eurIn = v => v ? String(Math.round(v * 100) / 100).replace('.', ',') : '';
+// graduations arrondies (300 000 plutôt que 301 000)
+const axisFmt = v => { if (UI.cur !== 'IDR') return `${Math.round(v)} €`; const r = v * rate(), st = r >= 50000 ? 10000 : 1000; return nf0.format(Math.round(r / st) * st); };
+// petit « i » qui déplie une explication
+const info = key => `<button type="button" class="info-btn" data-act="info" data-k="${key}" aria-label="C'est quoi ?" aria-expanded="${UI.info === key}">i</button>`;
+const infoText = (key, text) => UI.info === key ? `<p class="info-text">${text}</p>` : '';
 const expTotalStr = e => { const tot = (e.amount || 0) + (e.tip || 0); return e.currency === 'IDR' ? fmtIDR(tot, { exact: true }) : fmtEUR(tot); };
 const expEUR = e => toEUR((e.amount || 0) + (e.tip || 0), e.currency, e.currency === 'EUR' ? 1 : (e.rate || rate()));
 const catColor = id => `var(--c-${id})`;
@@ -94,15 +105,15 @@ const NAV = [
 function shell() {
   $('#app').innerHTML = `
   <header class="top">
-    <button class="brand" data-go="today" aria-label="Dompet, aller à aujourd'hui">
-      <span class="brand-mark" aria-hidden="true"></span><span class="brand-name">dompet</span>
+    <button class="brand" data-go="today" aria-label="QQ, aller à aujourd'hui">
+      <span class="brand-mark" aria-hidden="true"></span><span class="brand-name">QQ</span>
     </button>
     <div class="top-actions">
       <button class="sync" id="syncBtn" type="button"></button>
       <div class="seg cur-toggle" role="group" aria-label="Devise affichée">
         <button type="button" data-cur="IDR">Rp</button><button type="button" data-cur="EUR">€</button>
       </div>
-      <button class="icon-btn" data-go="settings" aria-label="Réglages">${icon(I.settings)}</button>
+      <button class="icon-btn" id="setBtn" data-go="settings" aria-label="Réglages">${icon(I.settings)}</button>
     </div>
   </header>
   <div class="layout">
@@ -124,6 +135,11 @@ function renderTop() {
   b.innerHTML = `<span class="dot"></span><span class="sync-l">${labels[st] || st}</span>`;
   b.title = store.error || (store.meta.lastSync ? `Dernière synchro : ${new Date(store.meta.lastSync).toLocaleString('fr-FR')}` : '');
   $$('.nav-btn').forEach(x => x.classList.toggle('on', x.dataset.go === UI.view));
+  const sb = $('#setBtn'), inS = UI.view === 'settings';
+  sb.dataset.go = inS ? UI.prev : 'settings';
+  sb.innerHTML = icon(inS ? I.close : I.settings);
+  sb.setAttribute('aria-label', inS ? 'Fermer les réglages' : 'Réglages');
+  sb.classList.toggle('on', inS);
 }
 
 function render() {
@@ -137,7 +153,9 @@ function render() {
 }
 function go(view) {
   if (view === 'add') return openExpense();
-  UI.view = view; lsSet('dompet:view', view);
+  if (view === 'settings' && UI.view !== 'settings') UI.prev = UI.view;
+  if (view !== 'settings') lsSet('dompet:view', view);
+  UI.view = view; UI.info = null;
   if (view === 'stats' && !UI.month) UI.month = ymOf(today());
   render(); window.scrollTo({ top: 0 });
   const v = $('#view'); v.classList.remove('enter'); void v.offsetWidth; v.classList.add('enter');
@@ -148,7 +166,7 @@ function viewWelcome() {
   return `<section class="welcome">
     <div class="welcome-art" aria-hidden="true">${ring({ segs: DAILY_CATS.map(c => ({ value: DEFAULT_SPLIT[c], color: catColor(c) })), total: 100, size: 220, stroke: 14 })}</div>
     <h1>Ton budget de voyage, jour par jour.</h1>
-    <p class="lead">Note ce que tu dépenses à Bali, ou dis-le à Claude. Chaque matin, Dompet te dit combien tu peux dépenser aujourd'hui, en roupies et en euros.</p>
+    <p class="lead">Note ce que tu dépenses à Bali, ou dis-le à Claude. Chaque matin, QQ te dit combien tu peux dépenser aujourd'hui, en roupies et en euros.</p>
     <div class="welcome-actions">
       <button class="btn primary big" data-act="setup">Commencer</button>
       <button class="btn" data-act="sync-setup">J'ai déjà un dépôt GitHub</button>
@@ -158,22 +176,15 @@ function viewWelcome() {
 }
 
 // ---------- AUJOURD'HUI ----------
-function insight(ms) {
-  const t = ms.today;
-  if (ms.varBudget <= 0) return { cls: 'crit', ico: I.alert, text: `Logements et charges fixes (${m1(ms.fixed)}) dépassent déjà le budget de ${monthName(ms.ym).toLowerCase()} (${m1(ms.budget)}).` };
+// Une seule petite phrase, rangée dans le cadran, qui explique les chiffres juste au-dessus.
+function heroNote(ms) {
+  const t = ms.today, dy = ms.day;
+  if (ms.varBudget <= 0) return { cls: 'crit', ico: I.alert, text: `Les logements et charges fixes dépassent déjà le budget du mois.` };
+  if (dy.remaining < -0.3 && dy.tomorrow != null) return { cls: 'serious', ico: I.down, text: `Demain sera un peu plus serré pour compenser : ${m1(dy.tomorrow)} au lieu de ${m1(dy.base)}.` };
   const yest = ms.days.find(d => d.date === addDays(t, -1));
-  const tomorrow = ms.day.tomorrow;
-  if (ms.day.remaining < -0.3) {
-    const diff = tomorrow != null ? ms.day.base - tomorrow : 0;
-    return { cls: 'serious', ico: I.cloud, text: `Tu as dépassé de ${m1(-ms.day.remaining)} aujourd'hui.${tomorrow != null ? ` Demain, ton budget sera de ${m1(tomorrow)}${diff > 0.2 ? ` (${m1(diff)} de moins qu'un jour normal)` : ''} pour rattraper.` : ''}` };
-  }
-  if (yest && yest.dSpent > yest.dAllowance * 1.05) {
-    return { cls: 'warn', ico: I.down, text: `Hier : ${m1(yest.dSpent)} pour ${m1(yest.dAllowance)} prévus. Ton budget du jour a un peu baissé pour rattraper.` };
-  }
-  const ahead = ms.idealVarToDate - ms.spentBefore;
-  if (ahead > ms.baseDaily * 0.5) return { cls: 'good', ico: I.up, text: `Tu as ${m1(ahead)} d'avance sur le mois : ton budget du jour monte un peu.` };
-  if (ms.projected > ms.budget) return { cls: 'warn', ico: I.alert, text: `À ce rythme, ${monthName(ms.ym).toLowerCase()} finirait à ${m1(ms.projected)}, soit ${m1(ms.projected - ms.budget)} au-dessus.` };
-  return { cls: 'good', ico: I.check, text: `Tu es dans le rythme du mois.` };
+  if (yest && yest.dSpent > yest.dAllowance * 1.05) return { cls: 'warn', ico: I.down, text: `Un peu moins que d'habitude aujourd'hui : hier, ${m1(yest.dSpent)} pour ${m1(yest.dAllowance)} prévus.` };
+  if (dy.allowance > dy.base * 1.08) return { cls: 'good', ico: I.up, text: `Un peu plus que d'habitude aujourd'hui : tu as économisé les jours d'avant.` };
+  return null;
 }
 
 function favorites() {
@@ -194,9 +205,9 @@ function envRow(c, spent, allow, sub = '') {
   return `<li class="env ${frac > 1.001 ? 'over' : ''}">
     ${badge(c)}
     <div class="env-body">
-      <div class="env-top"><span class="env-name">${CAT[c].label}</span><span class="env-val"><b>${m1(spent, { compact: true })}</b> / ${m1(Math.max(0, allow), { compact: true })}</span></div>
+      <div class="env-top"><span class="env-name">${CAT[c].label}</span><span class="env-val"><span><b>${m1(spent)}</b> / ${m1(Math.max(0, allow))}</span><small class="alt">${m2(spent)} / ${m2(Math.max(0, allow))}</small></span></div>
       <div class="bar" data-tip="${esc(`${CAT[c].label} : ${m1(spent)} sur ${m1(Math.max(0, allow))}`)}"><span style="width:${Math.min(100, frac * 100)}%;background:${catColor(c)}"></span></div>
-      ${frac > 1.001 ? `<span class="env-extra neg">${m1(over, { compact: true })} de plus que prévu</span>` : sub ? `<span class="env-extra">${sub}</span>` : ''}
+      ${frac > 1.001 ? `<span class="env-extra neg">${m1(over)} de plus que prévu</span>` : sub ? `<span class="env-extra">${sub}</span>` : ''}
     </div></li>`;
 }
 
@@ -215,7 +226,7 @@ function viewToday() {
     track: 'var(--ring-track)',
     inner: { r: 104, stroke: 3, value: ms.varBudget > 0 ? ms.varSpent / ms.varBudget : 1, color: 'var(--berry)', tip: `${monthName(ms.ym)} : ${m1(ms.varSpent)} dépensés sur ${m1(ms.varBudget)} pour le quotidien`, marker: timeFrac, markerColor: 'var(--gold)', markerTip: 'Où tu devrais en être ce mois-ci' },
   });
-  const ins = insight(ms);
+  const note = heroNote(ms);
   const trip = tripSummary(D(), t);
   const stay = currentStay(t);
   const todays = D().expenses.filter(e => e.date === t).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -237,6 +248,7 @@ function viewToday() {
   ], { marker: B > 0 ? Math.min(1, (ms.fixed + ms.idealVarToDate) / Math.max(B, ms.committed)) : null, markerTip: 'Où tu devrais en être aujourd’hui' });
 
   return `
+  ${D().demo ? `<div class="demo-band"><p><b>Tu regardes un exemple.</b> Ce ne sont pas tes dépenses : les tiennes apparaîtront quand tu connecteras GitHub.</p><div class="row-btns"><button class="btn small primary" data-act="sync-setup">Connecter</button><button class="btn small ghost" data-act="wipe">Quitter l'exemple</button></div></div>` : ''}
   <section class="greet">
     <h1 class="date">${dayLong(t)}</h1>
     <p class="greet-sub">${trip && trip.started ? `Jour ${trip.dayIndex} à Bali` : trip ? `Départ dans ${trip.daysTo} jours` : 'Bali'}${stay ? ` · ${esc(stay.name)}` : ''}</p>
@@ -252,19 +264,19 @@ function viewToday() {
       </div>
     </div>
     <dl class="hero-facts">
-      <div><dt>Budget du jour</dt><dd>${m1(dy.allowance, { compact: true })}</dd></div>
-      <div><dt>Dépensé</dt><dd>${m1(dy.spent, { compact: true })}</dd></div>
-      <div class="tmrw"><dt>Demain</dt><dd>${dy.tomorrow != null ? m1(dy.tomorrow, { compact: true }) : '—'}</dd></div>
+      <div><dt>Budget du jour</dt><dd>${dual(dy.allowance)}</dd></div>
+      <div><dt>Dépensé</dt><dd>${dual(dy.spent)}</dd></div>
+      <div class="tmrw"><dt>Demain</dt><dd>${dy.tomorrow != null ? dual(dy.tomorrow) : '—'}</dd></div>
     </dl>
+    ${note ? `<p class="hero-note n-${note.cls}">${icon(note.ico)}<span>${note.text}</span></p>` : ''}
   </section>
 
   <form class="qbar" id="qform" autocomplete="off">
     <label class="sr" for="qbar">Ajouter une dépense en une phrase</label>
-    <input id="qbar" name="q" placeholder="Nasi goreng 35k cash…" enterkeyhint="go">
+    <input id="qbar" name="q" placeholder="Nasi goreng 35 000 cash" enterkeyhint="go">
     <button class="qbar-go" aria-label="Ajouter">${icon(I.plus)}</button>
   </form>
 
-  <p class="insight i-${ins.cls}">${icon(ins.ico)}<span>${ins.text}</span></p>
 
   ${yEmpty ? `<div class="nudge">
     <p>Rien de noté ${dayLong(y).toLowerCase()}. Un oubli ?</p>
@@ -273,35 +285,36 @@ function viewToday() {
 
   ${favs.length ? `<section class="block">
     <h2 class="h2">En un geste</h2>
-    <div class="fav-row">${favs.map(e => `<button class="fav" data-act="fav" data-id="${e.id}" style="--c:${catColor(e.cat)}">${catIcon(e.cat)}${esc(e.label)}<b>${e.currency === 'IDR' ? kIDR(e.amount + (e.tip || 0)) : fmtEUR(e.amount + (e.tip || 0))}</b></button>`).join('')}</div>
+    <div class="fav-row">${favs.map(e => `<button class="fav" data-act="fav" data-id="${e.id}" style="--c:${catColor(e.cat)}">${catIcon(e.cat)}${esc(e.label)}<b>${expTotalStr(e)}</b></button>`).join('')}</div>
   </section>` : ''}
 
   <section class="block card">
     <div class="card-head"><h2 class="h2">Aujourd'hui, poste par poste</h2></div>
     <ul class="env-list">
       ${DAY_CATS.filter(c => ms.cats[c].pct > 0 || ms.cats[c].today > 0).map(c => envRow(c, ms.cats[c].today, ms.cats[c].dailyAllowance,
-        c === 'food' ? `≈ ${m1(Math.max(0, ms.mealAllowance), { compact: true })} par repas` : '')).join('')}
+        c === 'food' ? `≈ ${m1(Math.max(0, ms.mealAllowance))} par repas (${m2(Math.max(0, ms.mealAllowance))})` : '')).join('')}
     </ul>
   </section>
 
   ${week ? `<section class="block card">
-    <div class="card-head"><h2 class="h2">Cette semaine</h2><span class="muted small">${dayShort(week.start)} → ${dayShort(week.end)}</span></div>
+    <div class="card-head"><h2 class="h2">Cette semaine ${info('week')}</h2><span class="muted small">${dayShort(week.start)} → ${dayShort(week.end)}</span></div>
+    ${infoText('week', 'Massage, sport, shopping et divers arrivent par à-coups. Au lieu de compter au jour, QQ te donne une enveloppe pour la semaine, du lundi au dimanche. Si tu la dépasses, la semaine suivante est un peu plus petite.')}
     <ul class="env-list">
       ${WEEK_CATS.filter(c => ms.cats[c].pct > 0 || ms.cats[c].weekSpent > 0).map(c => envRow(c, ms.cats[c].weekSpent, ms.cats[c].weekEnvelope,
         c === 'leisure' ? 'massage, sport, sorties' : '')).join('')}
     </ul>
-    <p class="muted small note">Ces dépenses arrivent par à-coups : elles se suivent à la semaine, pas au jour.</p>
   </section>` : ''}
 
   <section class="block card">
     <div class="card-head"><h2 class="h2">${monthName(ms.ym)}</h2><span class="muted small">jour ${diffDays(ms.first, t) + 1} sur ${ms.dim}</span></div>
     ${monthBar}
     <dl class="kv">
-      <div><dt><i style="background:${catColor('logement')}"></i>Logements</dt><dd>${m1(ms.fixedStays)}</dd></div>
-      ${ms.fixedRecurring > 0 ? `<div><dt><i style="background:${catColor('pro')}"></i>Charges fixes</dt><dd>${m1(ms.fixedRecurring)}</dd></div>` : ''}
-      <div><dt><i class="i-var"></i>Quotidien dépensé</dt><dd>${m1(ms.varSpent)}</dd></div>
-      <div class="kv-strong"><dt>Reste sur ${fmtEUR(B, { round: true })}${ms.prorated ? ` <button class="tiny-link" data-act="budget-month" title="Budget de ${fmtEUR(ms.fullBudget, { round: true })} ramené aux ${ms.dim} jours suivis ce mois-ci">au prorata</button>` : ''}</dt><dd class="${ms.remaining < 0 ? 'neg' : ''}">${m1(ms.remaining)}</dd></div>
-      <div><dt>À ce rythme, fin du mois</dt><dd class="${ms.projected > B ? 'neg' : ''}">${m1(ms.projected)}</dd></div>
+      <div><dt><i style="background:${catColor('logement')}"></i>Logements</dt><dd>${dual(ms.fixedStays)}</dd></div>
+      ${ms.fixedRecurring > 0 ? `<div><dt><i style="background:${catColor('pro')}"></i>Charges fixes</dt><dd>${dual(ms.fixedRecurring)}</dd></div>` : ''}
+      <div><dt><i class="i-var"></i>Quotidien dépensé</dt><dd>${dual(ms.varSpent)}</dd></div>
+      ${ms.extra > 0 ? `<div><dt><i class="i-inc"></i>Rentrées ajoutées au mois</dt><dd class="pos">+${m1(ms.extra)}</dd></div>` : ''}
+      <div class="kv-strong"><dt>Reste sur ${fmtEUR(B, { round: true })}${ms.prorated ? ` <button class="tiny-link" data-act="budget-month" title="Budget de ${fmtEUR(ms.fullBudget, { round: true })} ramené aux ${ms.dim} jours suivis ce mois-ci">au prorata</button>` : ''}</dt><dd class="${ms.remaining < 0 ? 'neg' : ''}">${dual(ms.remaining)}</dd></div>
+      <div><dt>À ce rythme, fin du mois</dt><dd class="${ms.projected > B ? 'neg' : ''}">${dual(ms.projected)}</dd></div>
     </dl>
   </section>
 
@@ -312,11 +325,19 @@ function viewToday() {
     ${todays.length ? `<ul class="tx-list">${todays.map(txRow).join('')}</ul>` : `<button class="empty" data-act="add">Rien pour l'instant. Écris ta dépense dans la barre plus haut, ou raconte-la à Claude.</button>`}
   </section>
 
-  ${cash != null ? `<section class="block card cash-card">
-    <div class="card-head"><h2 class="h2">Tes billets</h2><span class="muted small">estimation</span></div>
-    <p class="cash-big ${cash < 0 ? 'neg' : ''}">${fmtIDR(cash)}<span>${fmtEUR(cash / rate())}</span></p>
-    <div class="row-btns"><button class="btn small" data-act="withdraw">Retrait au distributeur</button><button class="btn small ghost" data-act="recount">J'ai recompté</button></div>
-  </section>` : ''}`;
+  ${cash != null ? walletCard(cash) : ''}`;
+}
+
+function walletCard(cash) {
+  return `<section class="block card cash-card">
+    <div class="card-head"><h2 class="h2">${icon(I.cash)} Tes billets ${info('wallet')}</h2><span class="muted small">estimation</span></div>
+    ${infoText('wallet', 'Ce qu’il te reste en liquide, sans avoir à compter : chaque dépense payée en billets est retirée toute seule, chaque retrait ou change est ajouté. De temps en temps, recompte pour corriger.')}
+    <div class="wallet">
+      <div><span class="cash-big ${cash.idr < 0 ? 'neg' : ''}">${fmtIDR(cash.idr)}</span><span class="muted small">en roupies · ${fmtEUR(cash.idr / rate())}</span></div>
+      ${cash.eur ? `<div><span class="cash-big ${cash.eur < 0 ? 'neg' : ''}">${fmtEUR(cash.eur)}</span><span class="muted small">en billets euros</span></div>` : ''}
+    </div>
+    <div class="row-btns"><button class="btn small" data-act="withdraw">Retrait</button>${cash.eur > 0 ? `<button class="btn small" data-act="exchange">Change d’euros</button>` : ''}<button class="btn small ghost" data-act="recount">J’ai recompté</button></div>
+  </section>`;
 }
 
 function savingsCard(sv, { full = false } = {}) {
@@ -326,11 +347,13 @@ function savingsCard(sv, { full = false } = {}) {
   return `<section class="block card savings">
     <div class="card-head"><h2 class="h2">${icon(I.jar)} Ta cagnotte</h2><span class="muted small">depuis le ${dayShort(sv.start)}</span></div>
     <div class="sv-row">
-      <div><span class="sv-big">${fmtEUR(sv.remaining, { round: true })}</span><span class="muted small">restent sur ${fmtEUR(sv.amount, { round: true })}</span></div>
+      <div><span class="sv-big">${fmtEUR(sv.remaining, { round: true })}</span><span class="muted small">restent sur ${fmtEUR(sv.amount + sv.income, { round: true })}${sv.income > 0 ? `, dont ${fmtEUR(sv.income, { round: true })} rentrés` : ''}</span></div>
       <div class="sv-end">${end ? `<span class="muted small">Elle tient jusqu'en</span><b>${monthYear(end)}</b><span class="muted small">${pace}</span>` : ''}</div>
     </div>
     <div class="bar sv-bar" data-tip="${esc(`Dépensé depuis le ${dayShort(sv.start)} : ${fmtEUR(sv.spent)}`)}"><span style="width:${Math.max(0.6, Math.min(100, sv.pct * 100))}%"></span></div>
     <p class="muted small">${fmtEUR(sv.spent, { round: true })} dépensés en ${sv.days} jour${sv.days > 1 ? 's' : ''}${sv.realDaily ? `, soit ${fmtEUR(sv.realDaily * 30.44, { round: true })} par mois` : ''}.</p>
+    <div class="row-btns sv-actions"><button class="btn small" data-act="income">${icon(I.plus)}Rentrée d’argent</button>${!full ? '' : `<span class="muted small">vente, chômage, remboursement…</span>`}</div>
+    ${full && (D().income || []).length ? `<h3 class="h3">Rentrées d’argent</h3><ul class="tx-list">${[...D().income].sort((a, b) => b.date.localeCompare(a.date)).map(incRow).join('')}</ul>` : ''}
     ${full ? `<ul class="runway">${[
       ...sv.scenarios.map(x => ({ label: x.key === 'ton budget' ? `Ton budget, ${fmtEUR(x.monthly, { round: true })}/mois` : `${fmtEUR(x.monthly, { round: true })} par mois`, months: x.months, me: x.key === 'ton budget' })),
       ...(sv.realDaily ? [{ label: `Ton rythme réel, ${fmtEUR(sv.realDaily * 30.44, { round: true })}/mois`, months: sv.remaining / (sv.realDaily * 30.44), real: true }] : []),
@@ -343,10 +366,18 @@ function savingsCard(sv, { full = false } = {}) {
   </section>`;
 }
 
+function incRow(x) {
+  const a = x.currency === 'IDR' ? fmtIDR(x.amount, { exact: true }) : fmtEUR(x.amount);
+  return `<li><button class="tx" data-act="income" data-id="${x.id}">
+    <span class="badge" style="--c:var(--c-groceries)">${icon(I.up)}</span>
+    <span class="tx-main"><span class="tx-label">${esc(x.label)}</span><span class="tx-meta">${dayShort(x.date)} · ${x.toMonth ? 'ajouté au budget du mois' : 'mis dans la cagnotte'}</span></span>
+    <span class="tx-amt pos">+${a}</span></button></li>`;
+}
+
 function txRow(e, { withDate = false } = {}) {
   const flags = [e.pay === 'cash' ? 'Billets' : 'Carte'];
   if (withDate) flags.unshift(dayShort(e.date));
-  if (e.tip) flags.push(`pourboire ${e.currency === 'IDR' ? kIDR(e.tip) : fmtEUR(e.tip)}`);
+  if (e.tip) flags.push(`pourboire ${e.currency === 'IDR' ? fmtIDR(e.tip, { exact: true }) : fmtEUR(e.tip)}`);
   if (e.spread) flags.push(e.spread === 'week' ? 'étalé sur 7 jours' : 'étalé sur 30 jours');
   if (e.offBudget) flags.push('hors budget du mois');
   if (e.src === 'claude') flags.push('via Claude');
@@ -372,11 +403,11 @@ function weekCard(t) {
   const prev = prevTot / 7;
   const max = Math.max(0.01, ...days.map(x => Math.max(x.v, x.prev)));
   const diff = prevTot > 0 ? (cur - prev) / prev : null;
-  return `<section class="block card">
-    <div class="card-head"><h2 class="h2">Bilan de la semaine</h2><span class="muted small">hors logement</span></div>
+  return `<section class="block plain">
+    <div class="card-head"><h2 class="h2">Ta semaine</h2><span class="muted small">hors logement</span></div>
     <div class="wk-sum">
-      <div><span class="kpi-v">${m1(cur, { compact: true })}</span><span class="muted small">par jour cette semaine</span></div>
-      ${diff != null ? `<div class="wk-diff ${diff > 0.05 ? 'up' : diff < -0.05 ? 'down' : ''}">${icon(diff > 0.05 ? I.up : diff < -0.05 ? I.down : I.check)}<span>${Math.abs(diff) < 0.05 ? 'comme' : `${Math.round(Math.abs(diff) * 100)} % ${diff > 0 ? 'de plus que' : 'de moins que'}`} la semaine dernière (${m1(prev, { compact: true })}/jour)</span></div>` : ''}
+      <div><span class="kpi-v">${m1(cur)}</span><span class="muted small">par jour cette semaine · ${m2(cur)}</span></div>
+      ${diff != null ? `<div class="wk-diff ${diff > 0.05 ? 'up' : diff < -0.05 ? 'down' : ''}">${icon(diff > 0.05 ? I.up : diff < -0.05 ? I.down : I.check)}<span>${Math.abs(diff) < 0.05 ? 'comme' : `${Math.round(Math.abs(diff) * 100)} % ${diff > 0 ? 'de plus que' : 'de moins que'}`} la semaine dernière (${m1(prev)} par jour)</span></div>` : ''}
     </div>
     <div class="wk" role="img" aria-label="Dépenses de chaque jour de la semaine, comparées à la semaine dernière">
       ${days.map((x, i) => `<div class="wk-col ${x.d === t ? 'is-today' : ''} ${x.future ? 'is-future' : ''}" data-tip="${esc(`${dayLong(x.d)} : ${x.future ? '—' : m1(x.v)}\nSemaine dernière : ${m1(x.prev)}`)}">
@@ -435,14 +466,29 @@ ${CAT[c]?.label} : ${m1(v)}`).join('')}`,
     startWeekday: weekday(ms.first), max: heatMax,
     cells: ms.days.map(d => ({ date: d.date, value: d.spent, empty: d.date > t, today: d.date === t, tip: `${dayLong(d.date)} : ${m1(d.spent)}` })),
   });
-  const trip = tripSummary(D(), t);
   const timeF = varDaysElapsed / ms.dim;
   const env = DAILY_CATS.filter(c => ms.cats[c].pct > 0).map(c => {
     const x = ms.cats[c]; const f = x.envelope > 0 ? x.spent / x.envelope : 0;
     return `<li class="env ${f > 1 ? 'over' : ''}">${badge(c)}<div class="env-body">
-      <div class="env-top"><span class="env-name">${CAT[c].label} <span class="muted small">${x.pct} %</span></span><span class="env-val"><b>${m1(x.spent, { compact: true })}</b> / ${m1(x.envelope, { compact: true })}</span></div>
-      <div class="bar has-marker"><span style="width:${Math.min(100, f * 100)}%;background:${catColor(c)}"></span><i style="left:${Math.min(100, timeF * 100)}%" data-tip="Où tu devrais en être aujourd’hui"></i></div></div></li>`;
+      <div class="env-top"><span class="env-name">${CAT[c].label}</span><span class="env-val"><span><b>${m1(x.spent)}</b> / ${m1(x.envelope)}</span><small class="alt">${m2(x.spent)} / ${m2(x.envelope)}</small></span></div>
+      <div class="bar has-marker"><span style="width:${Math.min(100, f * 100)}%;background:${catColor(c)}"></span><i style="left:${Math.min(100, timeF * 100)}%" data-tip="Où tu devrais en être aujourd’hui"></i></div><span class="env-extra">${x.pct} % du quotidien${WEEK_CATS.includes(c) ? ', suivi à la semaine' : ''}</span></div></li>`;
   }).join('');
+  const tab = ['days', 'cum', 'cal'].includes(UI.statTab) ? UI.statTab : 'days';
+  const chart = { days: bars, cum: burn, cal: heat }[tab];
+  const chartLegend = {
+    days: `<p class="legend-inline"><i class="li-bar"></i>dépensé <i class="li-line"></i>budget du jour</p>`,
+    cum: `<p class="legend-inline"><i class="li-real"></i>réel <i class="li-ideal"></i>rythme idéal</p>`,
+    cal: '',
+  }[tab];
+  const chartNote = {
+    days: 'Repas, courses, transport et pourboires. Un jour où tu dépenses moins, le budget des jours suivants remonte ; un jour où tu dépenses plus, il baisse un peu.',
+    cum: 'Tout compris, logements inclus. Tant que la courbe reste sous les pointillés, le mois tient.',
+    cal: 'Chaque case est un jour, hors logement. Plus elle est foncée, plus tu as dépensé.',
+  }[tab];
+  const pct = ms.budget ? Math.round(ms.committed / ms.budget * 100) : 0;
+  const verdict = !varDaysElapsed ? '' : perDay <= ms.baseDaily
+    ? `Prévu : ${m1(ms.baseDaily)}. Tu es en dessous, le mois tient.`
+    : `Prévu : ${m1(ms.baseDaily)}. C’est ${m1(perDay - ms.baseDaily)} de trop par jour.`;
 
   return `
   <div class="month-nav">
@@ -451,35 +497,40 @@ ${CAT[c]?.label} : ${m1(v)}`).join('')}`,
     <button class="icon-btn" data-act="month" data-d="1" aria-label="Mois suivant">${icon(I.right)}</button>
   </div>
 
-  <div class="kpis">
-    <div class="kpi"><span class="kpi-l">Par jour, hors logement</span><span class="kpi-v">${m1(perDay, { compact: true })}</span><span class="kpi-s">prévu ${m1(ms.baseDaily, { compact: true })}</span></div>
-    <div class="kpi"><span class="kpi-l">Dépensé, tout compris</span><span class="kpi-v">${m1(ms.committed, { compact: true })}</span><span class="kpi-s">${ms.budget ? Math.round(ms.committed / ms.budget * 100) : 0} % de ${fmtEUR(ms.budget, { round: true })}</span></div>
-    <div class="kpi"><span class="kpi-l">Repas moyen</span><span class="kpi-v">${m1(mealAvg, { compact: true })}</span><span class="kpi-s">${foodExp.length} repas notés</span></div>
-    <div class="kpi"><span class="kpi-l">Nuit moyenne</span><span class="kpi-v">${m1(nightAvg, { compact: true })}</span><span class="kpi-s">${nights.length} nuits ce mois</span></div>
-  </div>
+  <section class="lead-stat">
+    <p class="ls-label">${varDaysElapsed ? 'En moyenne, hors logement, tu dépenses par jour' : 'Ce mois n’a pas encore commencé.'}</p>
+    ${varDaysElapsed ? `<p class="ls-big">${m1(perDay)}</p><p class="ls-alt">${m2(perDay)}</p>
+    <p class="ls-sub ${perDay > ms.baseDaily * 1.03 ? 'warn' : 'ok'}">${verdict}</p>` : ''}
+    <div class="stat-row">
+      <div><span>Tout compris</span><b>${m1(ms.committed)}</b><small>${pct} % de ${fmtEUR(ms.budget, { round: true })}</small></div>
+      <div><span>Repas moyen</span><b>${m1(mealAvg)}</b><small>${foodExp.length} repas notés</small></div>
+      <div><span>Nuit moyenne</span><b>${m1(nightAvg)}</b><small>${nights.length} nuits</small></div>
+    </div>
+  </section>
+
+  <section class="block card">
+    <div class="card-head"><h2 class="h2">Au fil du mois</h2></div>
+    <div class="seg tabs" role="group" aria-label="Vue du graphique">
+      <button type="button" data-act="stab" data-t="days" aria-pressed="${tab === 'days'}">Chaque jour</button>
+      <button type="button" data-act="stab" data-t="cum" aria-pressed="${tab === 'cum'}">Cumulé</button>
+      <button type="button" data-act="stab" data-t="cal" aria-pressed="${tab === 'cal'}">Calendrier</button>
+    </div>
+    ${chart}
+    ${chartLegend}
+    <p class="muted small">${chartNote}</p>
+  </section>
 
   ${ym === ymOf(t) ? weekCard(t) : ''}
 
   ${sv ? savingsCard(sv, { full: true }) : ''}
 
-  <section class="block card">
-    <div class="card-head"><h2 class="h2">Où part l'argent</h2><span class="muted small">${m1(tot)}</span></div>
+  <section class="block plain">
+    <div class="card-head"><h2 class="h2">Où part l’argent</h2><span class="muted small">${m1(tot)}</span></div>
     ${tot > 0 ? `<div class="donut-wrap">
       <div class="donut">${donut({ segs: catRows.map(c => ({ value: c.v, color: catColor(c.id), tip: `${c.label} : ${m1(c.v)} (${Math.round(c.v / tot * 100)} %)` })) })}
-        <div class="donut-c"><b>${m1(tot, { compact: true })}</b><span>${m2(tot, { compact: true })}</span></div></div>
-      <table class="legend"><tbody>${catRows.map(c => `<tr><td><i style="background:${catColor(c.id)}"></i>${c.label}</td><td>${m1(c.v, { compact: true })}</td><td class="muted">${Math.round(c.v / tot * 100)} %</td></tr>`).join('')}</tbody></table>
+        <div class="donut-c"><b>${m1(tot)}</b><span>${m2(tot)}</span></div></div>
+      <table class="legend"><tbody>${catRows.map(c => `<tr><td><i style="background:${catColor(c.id)}"></i>${c.label}</td><td>${m1(c.v)}</td><td class="muted">${Math.round(c.v / tot * 100)} %</td></tr>`).join('')}</tbody></table>
     </div>` : `<p class="muted">Aucune dépense ce mois-ci.</p>`}
-  </section>
-
-  <section class="block card">
-    <div class="card-head"><h2 class="h2">Chaque jour</h2><span class="legend-inline"><i class="li-bar"></i>dépensé <i class="li-line"></i>budget du jour</span></div>
-    ${bars}
-    <p class="muted small">Repas, courses, transport et pourboires. Le budget du jour bouge : si tu dépenses moins, il remonte ; si tu dépenses plus, il baisse pour que le mois tienne.</p>
-  </section>
-
-  <section class="block card">
-    <div class="card-head"><h2 class="h2">Le mois en cumulé</h2><span class="legend-inline"><i class="li-real"></i>réel <i class="li-ideal"></i>rythme idéal</span></div>
-    ${burn}
   </section>
 
   <section class="block card">
@@ -488,32 +539,26 @@ ${CAT[c]?.label} : ${m1(v)}`).join('')}`,
     <button class="link" data-act="go-settings">Changer la répartition</button>
   </section>
 
-  <div class="grid2">
-    <section class="block card">
-      <div class="card-head"><h2 class="h2">Calendrier</h2><span class="muted small">hors logement</span></div>
-      ${heat}
-    </section>
-    <section class="block card">
-      <div class="card-head"><h2 class="h2">Selon le jour</h2><span class="muted small">moyenne</span></div>
-      <ul class="wd">${wdAvg.map((v, i) => `<li data-tip="${cap(WD[i])} : ${esc(m1(v))} en moyenne"><span>${WD_SHORT[i]}</span><div class="bar"><span style="width:${v / wdMax * 100}%"></span></div><b>${m1(v, { compact: true })}</b></li>`).join('')}</ul>
-      <h3 class="h3">Billets ou carte</h3>
-      ${stackBar([{ value: pays.cash, cls: 'sb-cash', tip: `Billets : ${m1(pays.cash)}` }, { value: pays.card, cls: 'sb-card', tip: `Carte : ${m1(pays.card)}` }])}
-      <p class="small muted pay-legend"><span><i class="sb-cash"></i>Billets ${m1(pays.cash, { compact: true })}</span><span><i class="sb-card"></i>Carte ${m1(pays.card, { compact: true })}</span><span>Pourboires ${m1(tipsTot, { compact: true })}</span></p>
-    </section>
-  </div>
+  <section class="block plain">
+    <div class="card-head"><h2 class="h2">Tes habitudes</h2></div>
+    <div class="grid2 habits">
+      <div>
+        <h3 class="h3">Selon le jour de la semaine</h3>
+        <ul class="wd">${wdAvg.map((v, i) => `<li data-tip="${cap(WD[i])} : ${esc(m1(v))} en moyenne"><span>${WD_SHORT[i]}</span><div class="bar"><span style="width:${v / wdMax * 100}%"></span></div><b>${m1(v)}</b></li>`).join('')}</ul>
+      </div>
+      <div>
+        <h3 class="h3">Billets ou carte</h3>
+        ${stackBar([{ value: pays.cash, cls: 'sb-cash', tip: `Billets : ${m1(pays.cash)}` }, { value: pays.card, cls: 'sb-card', tip: `Carte : ${m1(pays.card)}` }])}
+        <p class="small muted pay-legend"><span><i class="sb-cash"></i>Billets ${m1(pays.cash)}</span><span><i class="sb-card"></i>Carte ${m1(pays.card)}</span></p>
+        <p class="small muted">Pourboires du mois : ${m1(tipsTot)}</p>
+      </div>
+    </div>
+  </section>
 
   <section class="block card">
     <div class="card-head"><h2 class="h2">Plus grosses dépenses</h2></div>
     ${top.length ? `<ul class="tx-list">${top.map(e => txRow(e, { withDate: true })).join('')}</ul>` : '<p class="muted">Rien pour l’instant.</p>'}
   </section>
-
-  ${trip && trip.started ? `<section class="block card trip">
-    <div class="card-head"><h2 class="h2">Tout le voyage</h2><span class="muted small">depuis le ${dayShort(D().settings.tripStart)}</span></div>
-    <div class="kpis small-kpis">
-      <div class="kpi"><span class="kpi-l">Total</span><span class="kpi-v">${m1(trip.total, { compact: true })}</span><span class="kpi-s">${m2(trip.total, { compact: true })}</span></div>
-      <div class="kpi"><span class="kpi-l">Par jour, tout compris</span><span class="kpi-v">${m1(trip.perDay, { compact: true })}</span><span class="kpi-s">${trip.days} jours</span></div>
-    </div>
-  </section>` : ''}
 
   <details class="block card table-view"><summary>Voir le mois en tableau</summary>
     <table class="data-table"><thead><tr><th>Jour</th><th>Dépensé</th><th>Budget du jour</th><th>Logement</th></tr></thead>
@@ -575,11 +620,11 @@ function viewStays() {
   <h1 class="h1">Séjour</h1>
   <div class="kpis">
     <div class="kpi"><span class="kpi-l">Nuits réservées</span><span class="kpi-v">${cov.nights}</span><span class="kpi-s">jusqu'au ${cov.end ? dayShort(cov.end) : '—'}</span></div>
-    <div class="kpi"><span class="kpi-l">Total logements</span><span class="kpi-v">${m1(cov.total, { compact: true })}</span><span class="kpi-s">${unpaid > 0 ? `dont ${m1(unpaid, { compact: true })} à payer` : 'tout est payé'}</span></div>
-    <div class="kpi"><span class="kpi-l">Nuit moyenne</span><span class="kpi-v">${m1(cov.avgNight, { compact: true })}</span><span class="kpi-s">${m2(cov.avgNight, { compact: true })}</span></div>
-    <div class="kpi"><span class="kpi-l">Charges fixes / mois</span><span class="kpi-v">${m1(recMonthly, { compact: true })}</span><span class="kpi-s">${rec.length ? `${rec.length} au total` : 'aucune'}</span></div>
+    <div class="kpi"><span class="kpi-l">Total logements</span><span class="kpi-v">${m1(cov.total)}</span><span class="kpi-s">${unpaid > 0 ? `dont ${m1(unpaid)} à payer` : m2(cov.total)}</span></div>
+    <div class="kpi"><span class="kpi-l">Nuit moyenne</span><span class="kpi-v">${m1(cov.avgNight)}</span><span class="kpi-s">${m2(cov.avgNight)}</span></div>
+    <div class="kpi"><span class="kpi-l">Charges fixes / mois</span><span class="kpi-v">${m1(recMonthly)}</span><span class="kpi-s">${rec.length ? `${rec.length} au total` : 'aucune'}</span></div>
   </div>
-  ${gapNights && s.tripEnd ? cov.gaps.map(g => `<p class="insight i-warn">${icon(I.bed)}<span>Aucun logement du ${dayShort(g.from)} au ${dayShort(addDays(g.to, 1))} (${diffDays(g.from, g.to) + 1} nuit${diffDays(g.from, g.to) ? 's' : ''}). Au prix moyen, compte ≈ ${m1(cov.avgNight * (diffDays(g.from, g.to) + 1))}.</span></p>`).join('') : ''}
+  ${gapNights && s.tripEnd ? cov.gaps.filter(g => g.to >= t).map(g => { const from = g.from < t ? t : g.from, n = diffDays(from, g.to) + 1; return `<p class="insight i-warn">${icon(I.bed)}<span>Pas encore de logement réservé du ${dayShort(from)} au ${dayShort(addDays(g.to, 1))} (${n} nuit${n > 1 ? 's' : ''}). À prévoir : environ ${m1(cov.avgNight * n)}, au prix moyen de tes logements.</span></p>`; }).join('') : ''}
   ${cov.overlaps.map(g => `<p class="insight i-serious">${icon(I.alert)}<span>Deux logements se chevauchent du ${dayShort(g.from)} au ${dayShort(addDays(g.to, 1))} : ces nuits sont payées deux fois.</span></p>`).join('')}
 
   <section class="block card">
@@ -593,14 +638,15 @@ function viewStays() {
         <span class="stay-dates"><b>${Number(st.checkin.slice(8))}</b><small>${MSHORT[Number(st.checkin.slice(5, 7)) - 1]}</small></span>
         <span class="stay-main"><span class="stay-name">${esc(st.name)}${now ? ' <em class="tag">en ce moment</em>' : ''}</span>
           <span class="tx-meta">${esc(st.place || '')}${st.place ? ' · ' : ''}${n} nuit${n > 1 ? 's' : ''} → ${dayShort(st.checkout)}${st.paid ? '' : ' · à payer'}</span></span>
-        <span class="tx-amt">${m1(tot, { compact: true })}<small>${m1(tot / Math.max(1, n), { compact: true })} / nuit</small></span>
+        <span class="tx-amt">${m1(tot)}<small>${m1(tot / Math.max(1, n))} / nuit</small></span>
       </button></li>`;
     }).join('')}</ul>` : `<button class="empty" data-act="stay">Ajoute les logements déjà réservés : leur prix par nuit est retiré automatiquement de ton budget.</button>`}
   </section>
 
   <section class="block card">
-    <div class="card-head"><h2 class="h2">Charges fixes</h2><button class="btn small primary" data-act="rec">Ajouter</button></div>
-    <p class="muted small">Ce qui revient tout seul (Google Ads, Claude, forfait…). Compté automatiquement chaque mois : pas besoin de le noter à chaque fois.</p>
+    <div class="card-head"><h2 class="h2">Charges fixes ${info('fixed')}</h2><button class="btn small primary" data-act="rec">Ajouter</button></div>
+    ${infoText('fixed', 'Les abonnements prélevés tout seuls, chaque mois, comme Claude ou iCloud. QQ les retire de ton budget à la bonne date : tu n’as rien à noter. Les logements, eux, vont dans « Logements » juste au-dessus.')}
+    ${rec.length ? '' : `<p class="muted small">Ce qui est prélevé tout seul chaque mois : Claude, iCloud…</p>`}
     ${rec.length ? `<ul class="tx-list">${rec.map(r => `<li><button class="tx" data-act="rec" data-id="${r.id}">
       ${badge(r.cat || 'pro')}
       <span class="tx-main"><span class="tx-label">${esc(r.label)}${r.active === false ? ' <em class="tag">en pause</em>' : ''}</span>
@@ -618,7 +664,7 @@ function viewSettings() {
   const sug = suggestSplit(D());
   const cash = cashBalance(D());
   return `
-  <h1 class="h1">Réglages</h1>
+  <div class="page-head"><button class="icon-btn" data-go="${UI.prev}" aria-label="Retour">${icon(I.left)}</button><h1 class="h1">Réglages</h1></div>
   <form class="block card form" id="f-budget">
     <h2 class="h2">Budget</h2>
     <label>Budget par mois, tout compris<span class="input-suffix"><input name="defaultMonthlyBudget" type="number" inputmode="decimal" min="0" step="10" value="${s.defaultMonthlyBudget}"><em>€</em></span></label>
@@ -639,10 +685,10 @@ function viewSettings() {
 
   <section class="block card form">
     <h2 class="h2">Tes billets <span class="muted small">(facultatif)</span></h2>
-    <p class="muted small">Pour savoir combien de roupies il te reste dans le portefeuille sans les compter : tu indiques une fois ce que tu as, puis chaque retrait. Les dépenses payées en billets sont retirées toutes seules.</p>
-    ${cash != null ? `<p><b>${fmtIDR(cash)}</b> <span class="muted small">estimés · suivi depuis le ${dayShort(s.cashStart.date)}</span></p>` : ''}
-    <div class="row-btns"><button class="btn" data-act="recount">${cash != null ? 'Recompter' : 'Commencer le suivi'}</button>${cash != null ? `<button class="btn ghost" data-act="withdraw">Ajouter un retrait</button><button class="btn ghost danger" data-act="cash-stop">Arrêter le suivi</button>` : ''}</div>
-    ${D().cash.length && cash != null ? `<ul class="tx-list compact">${[...D().cash].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10).map(c => `<li><div class="tx">${badge('other')}<span class="tx-main"><span class="tx-label">${c.type === 'withdraw' ? 'Retrait' : 'Ajustement'}</span><span class="tx-meta">${dayShort(c.date)}${c.feeIDR ? ` · frais ${kIDR(c.feeIDR)}` : ''}</span></span><span class="tx-amt">${fmtIDR(c.amountIDR, { exact: true })}</span><button class="icon-btn" data-act="cash-del" data-id="${c.id}" aria-label="Supprimer">${icon(I.trash)}</button></div></li>`).join('')}</ul>` : ''}
+    <p class="muted small">Pour savoir combien de liquide il te reste sans compter : tu indiques une fois ce que tu as (roupies et euros), puis tes retraits et tes changes. Les dépenses payées en billets sont retirées toutes seules.</p>
+    ${cash ? `<p><b>${fmtIDR(cash.idr)}</b>${cash.eur ? ` et <b>${fmtEUR(cash.eur)}</b>` : ''} <span class="muted small">estimés · suivi depuis le ${dayShort(s.cashStart.date)}</span></p>` : ''}
+    <div class="row-btns"><button class="btn" data-act="recount">${cash ? 'Recompter' : 'Commencer le suivi'}</button>${cash ? `<button class="btn ghost" data-act="withdraw">Retrait</button><button class="btn ghost" data-act="exchange">Change d’euros</button><button class="btn ghost danger" data-act="cash-stop">Arrêter le suivi</button>` : ''}</div>
+    ${D().cash.length && cash ? `<ul class="tx-list compact">${[...D().cash].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10).map(c => `<li><div class="tx">${badge('other')}<span class="tx-main"><span class="tx-label">${{ withdraw: 'Retrait', exchange: 'Change d’euros', adjust: 'Ajustement' }[c.type] || 'Billets'}</span><span class="tx-meta">${dayShort(c.date)}${c.feeIDR ? ` · frais ${fmtIDR(c.feeIDR, { exact: true })}` : ''}</span></span><span class="tx-amt">${c.type === 'exchange' ? `${fmtEUR(c.amountEUR)} → ${fmtIDR(c.amountIDR, { exact: true })}` : [c.amountIDR ? fmtIDR(c.amountIDR, { exact: true }) : '', c.amountEUR ? fmtEUR(c.amountEUR) : ''].filter(Boolean).join(' · ')}</span><button class="icon-btn" data-act="cash-del" data-id="${c.id}" aria-label="Supprimer">${icon(I.trash)}</button></div></li>`).join('')}</ul>` : ''}
   </section>
 
   <form class="block card form" id="f-rate">
@@ -707,9 +753,9 @@ function openExpense(id, preset = {}) {
   const hist = labelHistory();
   const fmtA = (a, c) => a === '' || a == null ? '' : c === 'IDR' ? nf0.format(a) : String(a).replace('.', ',');
   const moreOpen = !!(v.spread || v.offBudget || v.note);
-  openSheet(`${sheetHead(e ? 'Modifier la dépense' : 'Nouvelle dépense', !!e)}
+  openSheet(`${sheetHead(e ? 'Modifier la dépense' : preset.again ? 'On l’ajoute encore ?' : 'Nouvelle dépense', !!e)}
   <form id="f-exp" class="form" autocomplete="off">
-    <label class="what">Quoi ?<input name="label" placeholder="nasi goreng 35k cash" value="${esc(preset.text || v.label)}" autofocus enterkeyhint="done"></label>
+    <label class="what">Quoi ?<input name="label" placeholder="nasi goreng 35 000 cash" value="${esc(preset.text || v.label)}" autofocus enterkeyhint="done"></label>
     <div class="amount-box">
       <input name="amount" class="amount-in" inputmode="decimal" placeholder="0" value="${fmtA(v.amount, v.currency)}" aria-label="Montant">
       <div class="seg" role="group" aria-label="Devise"><button type="button" data-c="IDR">Rp</button><button type="button" data-c="EUR">€</button></div>
@@ -737,6 +783,7 @@ function openExpense(id, preset = {}) {
     </details>
     <p class="form-err" id="err" role="alert"></p>
     <button class="btn primary big">${e ? 'Enregistrer' : 'Ajouter'}</button>
+    ${e ? '' : `<button type="button" class="link center" data-act="income">C’est de l’argent qui rentre ? (vente, chômage…)</button>`}
   </form>`, root => {
     const f = $('#f-exp', root);
     let cur = v.currency, pay = v.pay, cat = v.cat, spread = v.spread || '';
@@ -751,8 +798,8 @@ function openExpense(id, preset = {}) {
       conv();
     };
     const conv = () => {
-      const a = parseAmount(f.amount.value, cur), tp = parseAmount(f.tip.value, cur) || 0;
-      if (!Number.isFinite(a)) { $('#conv', root).textContent = cur === 'IDR' ? '« 50k » = 50 000 Rp · « 1,2jt » = 1 200 000 Rp' : 'Montant en euros'; return; }
+      const a = amt(f.amount.value, cur), tp = amt(f.tip.value, cur) || 0;
+      if (!Number.isFinite(a)) { $('#conv', root).textContent = cur === 'IDR' ? 'Tape 35 pour 35 000 Rp' : 'Montant en euros'; return; }
       const tot = a + tp;
       $('#conv', root).textContent = cur === 'IDR' ? `${fmtIDR(tot, { exact: true })} = ${fmtEUR(tot / rate())}` : `${fmtEUR(tot)} = ${fmtIDR(tot * rate())}`;
     };
@@ -772,7 +819,7 @@ function openExpense(id, preset = {}) {
     if (preset.text) readWhat();
     f.label.addEventListener('input', readWhat);
     f.label.addEventListener('blur', () => { const p = parseQuick(f.label.value, { history: hist, defaultCurrency: cur }); if (p.amount !== undefined && p.label) f.label.value = p.label; });
-    f.label.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); f.label.blur(); if (Number.isFinite(parseAmount(f.amount.value, cur)) && cat) f.requestSubmit(); else (cat ? f.amount : $('[data-cat]', root)).focus(); } });
+    f.label.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); f.label.blur(); if (Number.isFinite(amt(f.amount.value, cur)) && cat) f.requestSubmit(); else (cat ? f.amount : $('[data-cat]', root)).focus(); } });
     root.addEventListener('click', ev => {
       const b = ev.target.closest('button'); if (!b) return;
       if (b.dataset.c) { cur = b.dataset.c; touched.cur = true; sync(); }
@@ -788,7 +835,7 @@ function openExpense(id, preset = {}) {
     f.date.addEventListener('change', sync);
     f.addEventListener('submit', ev => {
       ev.preventDefault();
-      const amount = parseAmount(f.amount.value, cur), tipV = parseAmount(f.tip.value, cur) || 0;
+      const amount = amt(f.amount.value, cur), tipV = amt(f.tip.value, cur) || 0;
       if (!Number.isFinite(amount) || amount <= 0) return showErr(root, 'Indique un montant.');
       if (!cat) return showErr(root, 'Choisis une catégorie.');
       const p = parseQuick(f.label.value, { history: hist, defaultCurrency: cur });
@@ -863,7 +910,7 @@ function openRecurring(id) {
   const v = r || { label: '', cat: 'pro', amount: '', currency: 'EUR', freq: 'monthly', day: Number(today().slice(8)), start: today(), end: '', active: true, overrides: {} };
   openSheet(`${sheetHead(r ? 'Modifier la charge fixe' : 'Nouvelle charge fixe', !!r)}
   <form id="f-rec" class="form" autocomplete="off">
-    <label>Nom<input name="label" required placeholder="Google Ads, Claude, forfait…" value="${esc(v.label)}" autofocus></label>
+    <label>Nom<input name="label" required placeholder="Claude, iCloud…" value="${esc(v.label)}" autofocus></label>
     <div class="amount-box small"><input name="amount" class="amount-in" inputmode="decimal" placeholder="0" value="${v.amount}" aria-label="Montant"><div class="seg" role="group" aria-label="Devise"><button type="button" data-c="EUR">€</button><button type="button" data-c="IDR">Rp</button></div></div>
     <div class="two">
       <label>Fréquence<select name="freq"><option value="monthly" ${v.freq === 'monthly' ? 'selected' : ''}>Chaque mois</option><option value="weekly" ${v.freq === 'weekly' ? 'selected' : ''}>Chaque semaine</option><option value="yearly" ${v.freq === 'yearly' ? 'selected' : ''}>Chaque année</option></select></label>
@@ -871,7 +918,7 @@ function openRecurring(id) {
     </div>
     <label>Catégorie<select name="cat">${CATS.map(c => `<option value="${c.id}" ${v.cat === c.id ? 'selected' : ''}>${c.label}</option>`).join('')}</select></label>
     <div class="two"><label>Depuis<input type="date" name="start" value="${v.start || ''}"></label><label>Jusqu'au <span class="muted small">(facultatif)</span><input type="date" name="end" value="${v.end || ''}"></label></div>
-    <label>Montant réel pour ${monthName(ym).toLowerCase()} <span class="muted small">(si différent, ex. Google Ads)</span><input name="override" inputmode="decimal" value="${v.overrides?.[ym] ?? ''}"></label>
+    <label>Montant réel pour ${monthName(ym).toLowerCase()} <span class="muted small">(seulement si différent ce mois-ci)</span><input name="override" inputmode="decimal" value="${v.overrides?.[ym] ?? ''}"></label>
     <label class="check"><input type="checkbox" name="active" ${v.active !== false ? 'checked' : ''}> Active</label>
     <p class="form-err" id="err" role="alert"></p>
     <button class="btn primary big">${r ? 'Enregistrer' : 'Ajouter'}</button>
@@ -900,8 +947,8 @@ function openWithdraw() {
   openSheet(`${sheetHead('Retrait au distributeur')}
   <form id="f-wd" class="form" autocomplete="off">
     <label>Montant retiré<span class="input-suffix"><input name="amount" inputmode="decimal" placeholder="2 500 000" autofocus><em>Rp</em></span></label>
-    <div class="quick">${[1000000, 2000000, 2500000, 3000000].map(x => `<button type="button" class="chip" data-v="${x}">${kIDR(x)}</button>`).join('')}</div>
-    <div class="two"><label>Frais du distributeur<span class="input-suffix"><input name="fee" inputmode="decimal" placeholder="50k"><em>Rp</em></span></label><label>Frais de ta banque<span class="input-suffix"><input name="feeEUR" inputmode="decimal" placeholder="0"><em>€</em></span></label></div>
+    <div class="quick">${[1000000, 2000000, 2500000, 3000000].map(x => `<button type="button" class="chip" data-v="${x}">${nf0.format(x)}</button>`).join('')}</div>
+    <div class="two"><label>Frais du distributeur<span class="input-suffix"><input name="fee" inputmode="decimal" placeholder="50 000"><em>Rp</em></span></label><label>Frais de ta banque<span class="input-suffix"><input name="feeEUR" inputmode="decimal" placeholder="0"><em>€</em></span></label></div>
     <label>Date<input type="date" name="date" value="${today()}"></label>
     <p class="muted small">Un retrait n'est pas une dépense : il remplit ton portefeuille. Les frais, eux, comptent dans « Divers ».</p>
     <p class="form-err" id="err" role="alert"></p>
@@ -911,10 +958,10 @@ function openWithdraw() {
     root.addEventListener('click', ev => { const b = ev.target.closest('[data-v]'); if (b) f.amount.value = nf0.format(Number(b.dataset.v)); });
     f.addEventListener('submit', ev => {
       ev.preventDefault();
-      const a = parseAmount(f.amount.value, 'IDR');
+      const a = amt(f.amount.value, 'IDR');
       if (!Number.isFinite(a) || a <= 0) return showErr(root, 'Indique le montant retiré.');
-      if (!D().settings.cashStart?.date) setSettings({ cashStart: { date: f.date.value, amountIDR: 0 } });
-      upsert('cash', { type: 'withdraw', date: f.date.value, amountIDR: a, feeIDR: parseAmount(f.fee.value, 'IDR') || 0, feeEUR: parseAmount(f.feeEUR.value, 'EUR') || 0 });
+      if (!D().settings.cashStart?.date) setSettings({ cashStart: { date: f.date.value, amountIDR: 0, amountEUR: 0 } });
+      upsert('cash', { type: 'withdraw', date: f.date.value, amountIDR: a, feeIDR: amt(f.fee.value, 'IDR') || 0, feeEUR: parseAmount(f.feeEUR.value, 'EUR') || 0 });
       closeSheet(); toast('Retrait ajouté');
     });
   });
@@ -924,30 +971,106 @@ function openRecount() {
   const exp = cashBalance(D());
   openSheet(`${sheetHead('Combien de billets as-tu ?')}
   <form id="f-rc" class="form" autocomplete="off">
-    ${exp != null ? `<p class="muted">D'après tes dépenses, tu devrais avoir <b>${fmtIDR(exp)}</b>.</p>` : `<p class="muted">Compte les roupies de ton portefeuille. Ensuite, Dompet retire tout seul chaque dépense payée en billets et ajoute tes retraits.</p>`}
-    <label>Ce que tu as vraiment<span class="input-suffix"><input name="amount" inputmode="decimal" placeholder="850k" autofocus><em>Rp</em></span></label>
+    ${exp ? `<p class="muted">D’après tes dépenses, tu devrais avoir <b>${fmtIDR(exp.idr)}</b>${exp.eur ? ` et <b>${fmtEUR(exp.eur)}</b>` : ''}.</p>` : `<p class="muted">Compte ce qu’il y a dans ton portefeuille. Ensuite, QQ retire tout seul chaque dépense payée en billets et ajoute tes retraits.</p>`}
+    <label>Roupies<span class="input-suffix"><input name="amount" inputmode="decimal" placeholder="850 000" autofocus><em>Rp</em></span></label>
+    <label>Billets en euros <span class="muted small">(pas encore changés)</span><span class="input-suffix"><input name="eur" inputmode="decimal" placeholder="${exp ? eurIn(exp.eur) || '0' : '0'}"><em>€</em></span></label>
     <p class="muted small" id="diff"></p>
     <p class="form-err" id="err" role="alert"></p>
     <button class="btn primary big">Valider</button>
   </form>`, root => {
     const f = $('#f-rc', root);
-    f.amount.addEventListener('input', () => {
-      const a = parseAmount(f.amount.value, 'IDR'); if (!Number.isFinite(a) || exp == null) return;
-      const d = exp - a;
-      $('#diff', root).textContent = Math.abs(d) < 5000 ? 'Parfait, tout est noté.' : d > 0 ? `Il manque ${fmtIDR(d)} : Dompet l'ajoutera comme « Billets non notés » dans Divers.` : `Tu as ${fmtIDR(-d)} de plus que prévu : Dompet corrigera.`;
+    const eurVal = () => f.eur.value.trim() ? parseAmount(f.eur.value, 'EUR') : (exp ? exp.eur : 0);
+    f.addEventListener('input', () => {
+      const a = amt(f.amount.value, 'IDR'); if (!Number.isFinite(a) || !exp) return;
+      const d = exp.idr - a;
+      $('#diff', root).textContent = Math.abs(d) < 5000 ? 'Parfait, tout est noté.' : d > 0 ? `Il manque ${fmtIDR(d)} : QQ l’ajoutera comme « Billets non notés » dans Divers.` : `Tu as ${fmtIDR(-d)} de plus que prévu : QQ corrigera.`;
     });
     f.addEventListener('submit', ev => {
       ev.preventDefault();
-      const a = parseAmount(f.amount.value, 'IDR');
-      if (!Number.isFinite(a) || a < 0) return showErr(root, 'Indique un montant.');
+      const a = amt(f.amount.value, 'IDR'), e = eurVal();
+      if (!Number.isFinite(a) || a < 0) return showErr(root, 'Indique tes roupies (0 si tu n’en as pas).');
+      if (!Number.isFinite(e) || e < 0) return showErr(root, 'Indique tes euros (0 si tu n’en as pas).');
       const t = today();
-      if (exp == null) { setSettings({ cashStart: { date: t, amountIDR: a } }); }
-      else {
-        const d = exp - a;
+      if (!exp) {
+        // les dépenses en billets déjà notées aujourd'hui sont déjà sorties du portefeuille
+        const back = cur => D().expenses.filter(x => x.pay === 'cash' && x.date === t && (x.currency === 'EUR') === (cur === 'EUR')).reduce((s2, x) => s2 + (x.amount || 0) + (x.tip || 0), 0);
+        setSettings({ cashStart: { date: t, amountIDR: a + back('IDR'), amountEUR: e + back('EUR') } });
+      } else {
+        const d = exp.idr - a;
         if (d >= 5000) upsert('expenses', { date: t, amount: Math.round(d), currency: 'IDR', rate: rate(), tip: 0, cat: 'other', pay: 'cash', label: 'Billets non notés', note: 'écart au recomptage', src: 'manual', eur: Math.round(d / rate() * 100) / 100 });
         else if (d <= -5000) upsert('cash', { type: 'adjust', date: t, amountIDR: Math.round(-d) });
+        const de = Math.round((e - exp.eur) * 100) / 100;
+        if (Math.abs(de) >= 0.5) upsert('cash', { type: 'adjust', date: t, amountIDR: 0, amountEUR: de });
       }
       closeSheet(); toast('Portefeuille à jour');
+    });
+  });
+}
+
+function openExchange() {
+  const cash = cashBalance(D());
+  openSheet(`${sheetHead('Change d’euros')}
+  <form id="f-ex" class="form" autocomplete="off">
+    <label>Euros donnés<span class="input-suffix"><input name="eur" inputmode="decimal" placeholder="50" value="${cash && cash.eur > 0 ? eurIn(cash.eur) : ''}" autofocus><em>€</em></span></label>
+    <label>Roupies reçues<span class="input-suffix"><input name="idr" inputmode="decimal" placeholder="1 000 000"><em>Rp</em></span></label>
+    <p class="conv" id="conv"></p>
+    <label>Date<input type="date" name="date" value="${today()}"></label>
+    <p class="muted small">Ce n’est pas une dépense : tes billets changent juste de monnaie.</p>
+    <p class="form-err" id="err" role="alert"></p>
+    <button class="btn primary big">Ajouter le change</button>
+  </form>`, root => {
+    const f = $('#f-ex', root);
+    const conv = () => {
+      const e = parseAmount(f.eur.value, 'EUR'), i = amt(f.idr.value, 'IDR');
+      $('#conv', root).textContent = e > 0 && i > 0 ? `Taux obtenu : 1 € = ${nf0.format(Math.round(i / e))} Rp (taux officiel ${nf0.format(rate())} Rp)` : e > 0 ? `Au taux officiel, environ ${fmtIDR(e * rate())}` : '';
+    };
+    conv(); f.addEventListener('input', conv);
+    f.addEventListener('submit', ev => {
+      ev.preventDefault();
+      const e = parseAmount(f.eur.value, 'EUR'), i = amt(f.idr.value, 'IDR');
+      if (!(e > 0)) return showErr(root, 'Indique les euros donnés.');
+      if (!(i > 0)) return showErr(root, 'Indique les roupies reçues.');
+      if (!D().settings.cashStart?.date) setSettings({ cashStart: { date: f.date.value, amountIDR: 0, amountEUR: e } });
+      upsert('cash', { type: 'exchange', date: f.date.value, amountEUR: e, amountIDR: i });
+      closeSheet(); toast(`Change ajouté : ${fmtEUR(e)} → ${fmtIDR(i, { exact: true })}`);
+    });
+  });
+}
+
+// Rentrée d'argent : vente Vinted, chômage, remboursement…
+function openIncome(id) {
+  const x = id ? (D().income || []).find(i => i.id === id) : null;
+  const v = x || { label: '', amount: '', currency: 'EUR', date: today(), toMonth: false };
+  openSheet(`${sheetHead(x ? 'Modifier la rentrée' : 'Rentrée d’argent', !!x)}
+  <form id="f-inc" class="form" autocomplete="off">
+    <label>Quoi ?<input name="label" placeholder="Vente Vinted, chômage…" value="${esc(v.label)}" autofocus></label>
+    <div class="quick">${['Vente Vinted', 'Chômage', 'Remboursement'].map(l => `<button type="button" class="chip" data-l="${l}">${l}</button>`).join('')}</div>
+    <div class="amount-box small"><input name="amount" class="amount-in" inputmode="decimal" placeholder="0" value="${v.amount === '' ? '' : v.currency === 'IDR' ? nf0.format(v.amount) : eurIn(v.amount)}" aria-label="Montant"><div class="seg" role="group" aria-label="Devise"><button type="button" data-c="EUR">€</button><button type="button" data-c="IDR">Rp</button></div></div>
+    <label>Date<input type="date" name="date" value="${v.date}"></label>
+    <label class="check"><input type="checkbox" name="toMonth" ${v.toMonth ? 'checked' : ''}> Je veux pouvoir le dépenser ce mois-ci</label>
+    <p class="muted small" id="incHelp"></p>
+    <p class="form-err" id="err" role="alert"></p>
+    <button class="btn primary big">${x ? 'Enregistrer' : 'Ajouter la rentrée'}</button>
+  </form>`, root => {
+    const f = $('#f-inc', root); let cur = v.currency;
+    const sync = () => {
+      $$('[data-c]', root).forEach(b => b.setAttribute('aria-pressed', b.dataset.c === cur));
+      $('#incHelp', root).textContent = f.toMonth.checked ? 'Ton budget du mois grandit d’autant, et ton budget du jour aussi.' : 'L’argent va dans ta cagnotte : elle tiendra plus longtemps. Ton budget du mois ne change pas.';
+    };
+    sync();
+    f.toMonth.addEventListener('change', sync);
+    root.addEventListener('click', ev => {
+      const b = ev.target.closest('button'); if (!b) return;
+      if (b.dataset.c) { cur = b.dataset.c; sync(); }
+      if (b.dataset.l) { f.label.value = b.dataset.l; f.amount.focus(); }
+      if (b.dataset.act === 'sheet-del' && x) { remove('income', x.id); closeSheet(); toast('Rentrée supprimée', { label: 'Annuler', fn: () => upsert('income', x) }); }
+    });
+    f.addEventListener('submit', ev => {
+      ev.preventDefault();
+      const a = amt(f.amount.value, cur);
+      if (!Number.isFinite(a) || a <= 0) return showErr(root, 'Indique un montant.');
+      const saved = upsert('income', { ...(x || {}), label: f.label.value.trim() || 'Rentrée d’argent', amount: a, currency: cur, rate: cur === 'IDR' ? (x?.rate || rate()) : undefined, date: f.date.value || today(), toMonth: f.toMonth.checked });
+      closeSheet(); toast(x ? 'Rentrée modifiée' : `Ajouté : +${cur === 'IDR' ? fmtIDR(a, { exact: true }) : fmtEUR(a)}`, x ? null : { label: 'Annuler', fn: () => remove('income', saved.id) });
     });
   });
 }
@@ -1049,7 +1172,7 @@ async function refreshRate(force = false) {
 // ---------- actions ----------
 function exportData() {
   const blob = new Blob([JSON.stringify(D(), null, 1)], { type: 'application/json' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `dompet-${today()}.json`; a.click();
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `qq-${today()}.json`; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 function cycleTheme() {
@@ -1076,15 +1199,17 @@ document.addEventListener('click', ev => {
     case 'edit': return openExpense(id);
     case 'fav': {
       const e = D().expenses.find(x => x.id === id); if (!e) return;
-      const { id: _i, createdAt, updatedAt, spread, offBudget, ...rest } = e;
-      const saved = upsert('expenses', { ...rest, date: today(), rate: e.currency === 'IDR' ? rate() : undefined, src: 'manual', note: '' });
-      return toast(`Ajouté : ${e.label}`, { label: 'Annuler', fn: () => remove('expenses', saved.id) });
+      return openExpense(null, { label: e.label, amount: e.amount, currency: e.currency, cat: e.cat, pay: e.pay, tip: e.tip || 0, again: true });
     }
     case 'stay': return openStay(id);
     case 'rec': return openRecurring(id);
     case 'withdraw': return openWithdraw();
     case 'recount': return openRecount();
-    case 'cash-stop': if (confirm('Arrêter le suivi des billets ? Tes dépenses ne changent pas.')) setSettings({ cashStart: { date: null, amountIDR: 0 } }); return;
+    case 'exchange': return openExchange();
+    case 'income': return openIncome(id);
+    case 'info': UI.info = UI.info === a.dataset.k ? null : a.dataset.k; return render();
+    case 'stab': UI.statTab = a.dataset.t; return render();
+    case 'cash-stop': if (confirm('Arrêter le suivi des billets ? Tes dépenses ne changent pas.')) setSettings({ cashStart: { date: null, amountIDR: 0, amountEUR: 0 } }); return;
     case 'budget-month': return openBudgetMonth();
     case 'setup': return openSetup();
     case 'sync-setup': return openSyncSetup();
@@ -1124,7 +1249,7 @@ document.addEventListener('change', async ev => {
   if (ev.target.id === 'importFile') {
     const file = ev.target.files[0]; if (!file) return;
     try { const j = JSON.parse(await file.text()); if (!j.expenses) throw 0; if (confirm(`Importer ${j.expenses.length} dépenses ? Elles remplacent les données de ce téléphone.`)) { replaceAll(j); toast('Sauvegarde importée'); } }
-    catch { toast('Ce fichier n’est pas une sauvegarde Dompet.'); }
+    catch { toast('Ce fichier n’est pas une sauvegarde QQ.'); }
   }
 });
 document.addEventListener('submit', ev => {
@@ -1160,6 +1285,8 @@ document.addEventListener('submit', ev => {
 // ---------- démarrage ----------
 applyTheme();
 init();
+// l'exemple est toujours régénéré : dates du jour, dernières données de démo
+if (D().demo) replaceAll(demoData(), { demo: true });
 shell();
 render();
 onChange(() => render());
