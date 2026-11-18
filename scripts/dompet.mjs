@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalize, emptyData, uid, parseAmount, toEUR, todayIn, ymOf, monthSummary, cashBalance, CAT, DAILY_CATS, addDays } from '../js/engine.js';
+import { normalize, emptyData, uid, parseAmount, toEUR, todayIn, ymOf, monthSummary, cashBalance, savingsSummary, CAT, DAY_CATS, WEEK_CATS, addDays } from '../js/engine.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -58,11 +58,11 @@ if (cmd === 'add') {
     if (!Number.isFinite(amount) || amount <= 0) { console.error('Montant invalide :', JSON.stringify(x)); process.exit(1); }
     if (!CAT[x.cat]) { console.error(`Catégorie inconnue « ${x.cat} ». Choix : ${Object.keys(CAT).join(', ')}`); process.exit(1); }
     const rate = currency === 'IDR' ? R : undefined;
-    const e = upsert('expenses', { date: x.date || today, label: x.label || CAT[x.cat].label, amount, currency, tip, cat: x.cat, pay: x.pay || 'cash', note: x.note || '', rate, eur: Math.round(toEUR(amount + tip, currency, rate || 1) * 100) / 100, src: 'claude' });
+    const e = upsert('expenses', { date: x.date || today, label: x.label || CAT[x.cat].label, amount, currency, tip, cat: x.cat, pay: x.pay || 'cash', note: x.note || '', rate, ...(x.spread ? { spread: x.spread } : {}), ...(x.offBudget ? { offBudget: true } : {}), eur: Math.round(toEUR(amount + tip, currency, rate || 1) * 100) / 100, src: 'claude' });
     added.push(e);
   }
   save(D);
-  added.forEach(e => console.log(`+ ${e.date}  ${CAT[e.cat].emoji} ${e.label}  ${e.currency === 'IDR' ? idr(e.amount + e.tip) : eur(e.amount + e.tip)}  [${e.pay}]  id=${e.id}`));
+  added.forEach(e => console.log(`+ ${e.date}  ${CAT[e.cat].label} · ${e.label}  ${e.currency === 'IDR' ? idr(e.amount + e.tip) : eur(e.amount + e.tip)}  [${e.pay}]  id=${e.id}`));
 } else if (cmd === 'upsert') {
   const col = args[1]; if (!['expenses', 'stays', 'recurring', 'cash'].includes(col)) { console.error('Collection : expenses | stays | recurring | cash'); process.exit(1); }
   const x = parseJSON(args[2]);
@@ -89,12 +89,18 @@ if (cmd === 'add') {
 } else {
   // status
   const ms = monthSummary(D, ymOf(today), today);
+  const dy = ms.day;
   const cash = cashBalance(D);
+  const sv = savingsSummary(D, today);
+  const mois = (m) => m >= 1 ? `${Math.floor(m)} mois` : `${Math.round(m * 30)} jours`;
   console.log(`Dompet — ${today} (${tz})  ·  fichier : ${dataPath}`);
-  console.log(`Budget ${ymOf(today)} : ${eur(ms.budget)}${ms.prorated ? ' (prorata)' : ''}  ·  fixes ${eur(ms.fixed)}  ·  quotidien dépensé ${eur(ms.varSpent)}  ·  reste ${eur(ms.remaining)}`);
-  console.log(`Aujourd'hui : budget ${both(ms.todayAllowance)}, dépensé ${both(ms.spentToday)}, reste ${both(ms.remainingToday)}`);
-  if (ms.tomorrowAllowance != null) console.log(`Demain : ${both(ms.tomorrowAllowance)}  (jour normal : ${both(ms.baseDaily)})`);
-  console.log(`Repas : ≈ ${both(ms.mealAllowance)} par repas  ·  projection fin de mois ${eur(ms.projected)}`);
-  for (const c of DAILY_CATS) { const x = ms.cats[c]; if (x.pct) console.log(`  ${CAT[c].emoji} ${CAT[c].label.padEnd(20)} aujourd'hui ${idr(x.today * R).padStart(12)} / ${idr(Math.max(0, x.dailyAllowance) * R)}`); }
-  if (cash != null) console.log(`Cash estimé : ${idr(cash)}`);
+  console.log(`Budget ${ymOf(today)} : ${eur(ms.budget)}${ms.prorated ? ' (prorata)' : ''}  ·  logements+fixes ${eur(ms.fixed)}  ·  quotidien dépensé ${eur(ms.varSpent)}  ·  reste ${eur(ms.remaining)}`);
+  console.log(`Aujourd'hui (repas, courses, transport, pourboires) : budget ${both(dy.allowance)}, dépensé ${both(dy.spent)}, reste ${both(dy.remaining)}`);
+  if (dy.tomorrow != null) console.log(`Demain : ${both(dy.tomorrow)}  (jour normal : ${both(dy.base)})`);
+  console.log(`Repas : ≈ ${both(ms.mealAllowance)} par repas  ·  à ce rythme, fin de mois ${eur(ms.projected)}`);
+  for (const c of DAY_CATS) { const x = ms.cats[c]; if (x.pct) console.log(`  ${CAT[c].label.padEnd(22)} aujourd'hui ${idr(x.today * R).padStart(12)} / ${idr(Math.max(0, x.dailyAllowance) * R)}`); }
+  console.log('Cette semaine :');
+  for (const c of WEEK_CATS) { const x = ms.cats[c]; if (x.pct) console.log(`  ${CAT[c].label.padEnd(22)} ${idr(x.weekSpent * R).padStart(12)} / ${idr(Math.max(0, x.weekEnvelope) * R)}`); }
+  if (sv) console.log(`Cagnotte : ${eur(sv.remaining)} restent sur ${eur(sv.amount)} · ${eur(sv.spent)} dépensés en ${sv.days} j${sv.realDaily ? ` (${eur(sv.realDaily * 30.44)}/mois)` : ''} · tient ≈ ${mois(sv.monthsLeft)}${sv.endDate ? ` (→ ${sv.endDate.slice(0, 7)})` : ''}`);
+  if (cash != null) console.log(`Billets estimés : ${idr(cash)}`);
 }

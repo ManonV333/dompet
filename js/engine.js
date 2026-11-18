@@ -6,7 +6,7 @@ export const CATS = [
   { id: 'food',      label: 'Repas',               emoji: '🍜', hint: 'Warung, resto, café, GoFood' },
   { id: 'groceries', label: 'Courses',             emoji: '🛒', hint: 'Supermarché, eau, fruits' },
   { id: 'transport', label: 'Transport',           emoji: '🛵', hint: 'Grab, Gojek, scooter, essence' },
-  { id: 'leisure',   label: 'Sorties & activités', emoji: '🌊', hint: 'Surf, spa, excursion, bar' },
+  { id: 'leisure',   label: 'Bien-être & sorties', emoji: '🌸', hint: 'Massage, sport, surf, bar' },
   { id: 'shopping',  label: 'Shopping',            emoji: '🛍️', hint: 'Vêtements, souvenirs' },
   { id: 'tips',      label: 'Pourboires',          emoji: '🙏', hint: 'Tips, offrandes' },
   { id: 'pro',       label: 'Pro & abonnements',   emoji: '💼', hint: 'Google Ads, logiciels, coworking' },
@@ -14,14 +14,17 @@ export const CATS = [
 ];
 export const CAT = Object.fromEntries(CATS.map(c => [c.id, c]));
 
-// Catégories qui reçoivent une enveloppe quotidienne (le reste passe par les charges fixes).
-export const DAILY_CATS = ['food', 'groceries', 'transport', 'leisure', 'shopping', 'tips', 'other'];
+// Catégories du quotidien variable. Les « jour » se suivent jour par jour,
+// les « semaine » (dépenses irrégulières : massage, shopping…) se suivent à la semaine.
+export const DAILY_CATS = ['food', 'groceries', 'transport', 'tips', 'leisure', 'shopping', 'other'];
+export const DAY_CATS = ['food', 'groceries', 'transport', 'tips'];
+export const WEEK_CATS = ['leisure', 'shopping', 'other'];
 
 export const SUGGESTIONS = {
   food: ['Warung', 'Restaurant', 'Café', 'Smoothie bowl', 'GoFood', 'Street food', 'Petit-déj'],
   groceries: ['Supermarché', 'Eau', 'Fruits', 'Snacks', 'Pepito'],
   transport: ['Grab', 'Gojek', 'Location scooter', 'Essence', 'Bateau / ferry', 'Vol', 'Parking'],
-  leisure: ['Surf', 'Massage / spa', 'Excursion', 'Yoga', 'Beach club', 'Bar', 'Entrée temple'],
+  leisure: ['Massage', 'Salle de sport', 'Yoga', 'Surf', 'Beach club', 'Excursion', 'Bar'],
   shopping: ['Vêtements', 'Souvenirs', 'Cosmétiques', 'Accessoires'],
   tips: ['Pourboire', 'Offrande'],
   pro: ['Google Ads', 'Abonnement', 'Logiciel', 'Coworking'],
@@ -29,7 +32,8 @@ export const SUGGESTIONS = {
   logement: ['Nuit supplémentaire', 'Caution', 'Ménage'],
 };
 
-export const DEFAULT_SPLIT = { food: 40, groceries: 10, transport: 15, leisure: 15, shopping: 8, tips: 5, other: 7 };
+// Calé sur son plan : ~290 €/mois de quotidien, eau 15, massage 26 + sport 100, pourboires 15.
+export const DEFAULT_SPLIT = { food: 42, groceries: 5, transport: 10, tips: 3, leisure: 26, shopping: 6, other: 8 };
 
 export function emptyData() {
   const now = new Date().toISOString();
@@ -48,7 +52,8 @@ export function emptyData() {
       rateDate: null,
       rateAuto: true,
       split: { ...DEFAULT_SPLIT },
-      mealsPerDay: 2,
+      mealsPerDay: 3,
+      savings: { amount: null, date: null }, // cagnotte totale du voyage
       cashStart: { date: null, amountIDR: 0 },
       timezone: 'Asia/Makassar',
     },
@@ -134,10 +139,18 @@ export function linesBetween(data, from, to) {
   const s = data.settings, rate = s.rate;
   const L = [];
   for (const e of data.expenses) {
-    if (e.date < from || e.date > to) continue;
+    const n = e.spread === 'month' ? 30 : e.spread === 'week' ? 7 : 1;
+    const last = n > 1 ? addDays(e.date, n - 1) : e.date;
+    if (last < from || e.date > to) continue;
     const r = e.currency === 'EUR' ? 1 : (e.rate || rate);
-    L.push({ date: e.date, eur: toEUR(e.amount, e.currency, r), cat: e.cat, kind: 'expense', fixed: false, pay: e.pay, label: e.label, ref: e.id });
-    if (e.tip) L.push({ date: e.date, eur: toEUR(e.tip, e.currency, r), cat: 'tips', kind: 'tip', fixed: false, pay: e.pay, label: `Pourboire · ${e.label || ''}`, ref: e.id });
+    const base = toEUR(e.amount, e.currency, r) / n, tip = e.tip ? toEUR(e.tip, e.currency, r) / n : 0;
+    for (let i = 0; i < n; i++) {
+      const d = n > 1 ? addDays(e.date, i) : e.date;
+      if (d < from || d > to) continue;
+      // offBudget : payé d'avance (vol, VPN…) → sort de la cagnotte mais pas du budget du mois
+      L.push({ date: d, eur: base, cat: e.cat, kind: e.offBudget ? 'offbudget' : 'expense', fixed: !!e.offBudget, off: !!e.offBudget, pay: e.pay, label: e.label, ref: e.id, spread: n > 1 });
+      if (tip) L.push({ date: d, eur: tip, cat: 'tips', kind: 'tip', fixed: false, pay: e.pay, label: `Pourboire · ${e.label || ''}`, ref: e.id });
+    }
   }
   for (const st of data.stays) {
     const n = stayNights(st); if (!n) continue;
@@ -184,7 +197,7 @@ export function monthSummary(data, ym, today) {
   const explicit = s.monthlyBudgets && s.monthlyBudgets[ym] != null;
   const prorated = !explicit && dim < fullDim;
   const B = prorated ? budgetFor(data, ym) * dim / fullDim : budgetFor(data, ym);
-  const lines = linesBetween(data, first, last);
+  const lines = linesBetween(data, first, last).filter(l => !l.off);
   const fixedLines = lines.filter(l => l.fixed), varLines = lines.filter(l => !l.fixed);
   const fixed = sum(fixedLines);
   const fixedStays = sum(fixedLines.filter(l => l.kind === 'stay'));
@@ -227,8 +240,16 @@ export function monthSummary(data, ym, today) {
     const before = sum(cl.filter(l => l.date < ref));
     const todayC = state === 'current' ? sum(cl.filter(l => l.date === today)) : 0;
     const fixedC = sum(fixedLines.filter(l => l.cat === c.id));
+    // semaine en cours (lundi → dimanche), bornée au mois
+    const ws = state === 'current' ? (addDays(today, -weekday(today)) < first ? first : addDays(today, -weekday(today))) : null;
+    const we = ws ? (addDays(ws, 6 - (ws === first ? weekday(first) : 0)) > last ? last : addDays(ws, 6 - (ws === first ? weekday(first) : 0))) : null;
+    const weekDays = ws ? diffDays(ws, we) + 1 : 0;
+    const weekSpent = ws ? sum(cl.filter(l => l.date >= ws && l.date <= today)) : 0;
+    const weekBefore = ws ? sum(cl.filter(l => l.date < ws)) : before;
+    const weekEnvelope = ws && daysLeft ? Math.max(0, env - weekBefore) * Math.min(weekDays, diffDays(ws, last) + 1) / (diffDays(ws, last) + 1) : 0;
     cats[c.id] = {
       pct, envelope: env, spent: sum(cl), spentBefore: before, today: todayC, fixed: fixedC,
+      weekSpent, weekEnvelope, weekRemaining: weekEnvelope - weekSpent, weekStart: ws, weekEnd: we,
       dailyAllowance: daysLeft && pct ? (env - before) / daysLeft : 0,
       count: cl.filter(l => l.kind === 'expense').length,
     };
@@ -236,23 +257,39 @@ export function monthSummary(data, ym, today) {
   const meals = Math.max(1, s.mealsPerDay || 2);
   const mealAllowance = cats.food.dailyAllowance / meals;
 
+  // Le « jour » : seulement le quotidien régulier (repas, courses, transport, pourboires).
+  // Massage, shopping, divers se suivent à la semaine et ne font pas exploser la journée.
+  const inDay = l => DAY_CATS.includes(l.cat);
+  const dayPct = DAY_CATS.reduce((a, c) => a + (split[c] || 0), 0);
+  const dayBudget = varBudget * dayPct / 100;
+  const dLines = varLines.filter(inDay);
+  const dBefore = sum(dLines.filter(l => l.date < ref));
+  const dToday = state === 'current' ? sum(dLines.filter(l => l.date === today)) : 0;
+  const dAllow = daysLeft ? (dayBudget - dBefore) / daysLeft : 0;
+  const day = {
+    budget: dayBudget, base: dayBudget / dim, allowance: dAllow, spent: dToday, remaining: dAllow - dToday, spentBefore: dBefore,
+    tomorrow: daysLeft > 1 ? (dayBudget - dBefore - dToday) / (daysLeft - 1) : null,
+    idealToDate: dayBudget / dim * (state === 'current' ? elapsedFull : state === 'past' ? dim : 0),
+  };
+
   // Série jour par jour (pour les graphes)
   const days = [];
-  let cum = 0;
+  let cum = 0, cumD = 0;
   for (let i = 0; i < dim; i++) {
     const d = addDays(first, i);
     const dl = varLines.filter(l => l.date === d);
     const allowance = (varBudget - cum) / (dim - i);
-    const spent = sum(dl);
-    days.push({ date: d, spent, allowance, fixed: sum(fixedLines.filter(l => l.date === d)), cumVar: cum + spent, byCat: groupSum(dl) });
-    cum += spent;
+    const dAllowance = (dayBudget - cumD) / (dim - i);
+    const spent = sum(dl), dSpent = sum(dl.filter(inDay));
+    days.push({ date: d, spent, allowance, dSpent, dAllowance, fixed: sum(fixedLines.filter(l => l.date === d)), cumVar: cum + spent, byCat: groupSum(dl) });
+    cum += spent; cumD += dSpent;
   }
 
   return {
     ym, first, last, dim, fullDim, prorated, fullBudget: budgetFor(data, ym), state, today, budget: B, fixed, fixedStays, fixedRecurring, varBudget,
     spentBefore, spentToday, varSpent, committed: fixed + varSpent, remaining: B - fixed - varSpent,
     daysLeft, baseDaily, todayAllowance, remainingToday, tomorrowAllowance,
-    avgRecent, avgMonth, projected, idealVarToDate, cats, mealAllowance, meals, days, lines,
+    avgRecent, avgMonth, projected, idealVarToDate, cats, mealAllowance, meals, days, lines, day,
   };
 }
 
@@ -358,5 +395,102 @@ export function suggestSplit(data) {
   const out = {}; let acc = 0;
   DAILY_CATS.forEach(c => { out[c] = Math.round((g[c] || 0) / tot * 100); acc += out[c]; });
   out.food += 100 - acc;
+  return out;
+}
+
+// ---------- la cagnotte : combien de temps ça tient ----------
+export function savingsSummary(data, today) {
+  const s = data.settings;
+  const sv = s.savings || {};
+  const start = sv.date || s.tripStart;
+  if (!sv.amount || !start) return null;
+  const end = today < start ? start : today;
+  const lines = linesBetween(data, start, end);
+  const spent = sum(lines);
+  const days = Math.max(1, diffDays(start, end) + 1);
+  const remaining = sv.amount - spent;
+  // rythme réel (≥ 7 jours de données), sinon le budget mensuel
+  const budgetDaily = s.defaultMonthlyBudget * 12 / 365;
+  const realDaily = days >= 7 ? spent / days : null;
+  const pace = realDaily || budgetDaily;
+  const daysLeft = pace > 0 ? remaining / pace : Infinity;
+  const endDate = Number.isFinite(daysLeft) ? addDays(end, Math.floor(daysLeft)) : null;
+  // engagements futurs déjà réservés (logements après aujourd'hui)
+  const booked = sum(linesBetween(data, addDays(end, 1), '2099-12-31').filter(l => l.kind === 'stay'));
+  const scen = [['faible', 690], ['ton budget', s.defaultMonthlyBudget], ['élevé', 990]].map(([k, m]) => ({ key: k, monthly: m, months: remaining / m }));
+  return { amount: sv.amount, start, spent, remaining, days, realDaily, budgetDaily, pace, monthsLeft: daysLeft / 30.44, endDate, booked, scenarios: scen, pct: spent / sv.amount };
+}
+
+// ---------- bilan d'une semaine ----------
+export function weekSummary(data, today) {
+  const ws = addDays(today, -weekday(today));
+  const prev = addDays(ws, -7);
+  const cur = linesBetween(data, ws, today).filter(l => !l.fixed);
+  const last = linesBetween(data, prev, addDays(ws, -1)).filter(l => !l.fixed);
+  const days = diffDays(ws, today) + 1;
+  return { start: ws, days, spent: sum(cur), lastWeek: sum(last), byCat: groupSum(cur), perDay: sum(cur) / days, lastPerDay: sum(last) / 7 };
+}
+
+// ---------- saisie en une phrase : « nasi goreng 35k cash » ----------
+const KEYWORDS = {
+  food: 'nasi mie mee goreng warung warteg resto restaurant cafe coffee kopi latte cappuccino smoothie bowl acai dej dejeuner diner brunch repas pizza burger gofood grabfood shopeefood babi guling sate satay ayam gado poke jus juice glace gelato croissant boulangerie bakery coco coconut sushi pad thai curry soupe salade sandwich wrap tacos breakfast lunch dinner bakso martabak pisang',
+  groceries: 'eau water aqua supermarche supermarket pepito indomaret alfamart minimart courses fruits fruit snack snacks biscuits yaourt lait pain cereales gourde',
+  transport: 'gojek grab taxi bluebird scooter essence bensin pertamina bateau ferry fastboat bus navette shuttle parking moto bemo uber',
+  leisure: 'massage spa sport gym salle yoga surf pilates cours temple entree beach club bar biere bintang cocktail excursion tour sortie cinema plongee snorkeling manucure manucure nails ongles coiffeur reflexologie sauna hammam boxe muay',
+  shopping: 'robe maillot vetement vetements short top sandales tongs souvenir souvenirs sac bijou bijoux creme solaire cosmetique cosmetiques maquillage lunettes chapeau paréo pareo',
+  tips: 'pourboire tip tips offrande',
+  pro: 'ads google canva domaine hebergement shopify claude chatgpt abonnement logiciel coworking',
+  other: 'laundry lessive pressing sim data forfait pharmacie medecin docteur visa frais cadeau poste impression',
+};
+const KW = new Map();
+for (const [cat, words] of Object.entries(KEYWORDS)) for (const w of words.split(' ')) if (!KW.has(w)) KW.set(w, cat);
+const PHRASES = [['beach club', 'leisure'], ['google ads', 'pro'], ['fast boat', 'transport'], ['petit dej', 'food'], ['salle de sport', 'leisure']];
+const deacc = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const FILLER = new Set(['de', 'du', 'des', 'd', 'le', 'la', 'les', 'l', 'un', 'une', 'en', 'a', 'au', 'aux', 'pour', 'et', 'avec', 'par', 'paye', 'payee', 'payé']);
+const PAY = { cash: 'cash', especes: 'cash', espece: 'cash', liquide: 'cash', carte: 'card', cb: 'card', card: 'card', visa: 'card', wise: 'card', revolut: 'card' };
+
+export function guessCat(label, history) {
+  const n = deacc(label || '').trim();
+  if (!n) return null;
+  if (history && history.has(n)) return history.get(n);
+  for (const [p, c] of PHRASES) if (n.includes(p)) return c;
+  for (const w of n.split(/[^a-z0-9]+/)) if (KW.has(w)) return KW.get(w);
+  return null;
+}
+
+// Renvoie ce qu'on a compris, champ par champ (les champs absents restent undefined).
+export function parseQuick(text, { history = null, defaultCurrency = 'IDR' } = {}) {
+  const out = { label: '', amount: undefined, currency: undefined, pay: undefined, tip: undefined, cat: null };
+  if (!text || !text.trim()) return out;
+  const toks = text.trim().split(/\s+/);
+  const words = [];
+  let tipNext = false;
+  if (toks.some(x => /^(eur|euro|euros|€)$/.test(deacc(x)))) out.currency = 'EUR';
+  for (let i = 0; i < toks.length; i++) {
+    const raw = toks[i], t = deacc(raw).replace(/[,;!?]$/, '');
+    if (PAY[t]) { out.pay = PAY[t]; continue; }
+    if (/^(tip|tips|pourboire|\+tip)$/.test(t)) { tipNext = true; continue; }
+    if (/^(eur|euro|euros|€)$/.test(t)) { out.currency = 'EUR'; continue; }
+    if (/^(rp|idr|roupies?)$/.test(t)) { out.currency = 'IDR'; continue; }
+    const m = t.replace(/^\+/, '').match(/^(rp)?(\d+(?:[.,]\d+)*)(k|rb|ribu|jt|juta|m)?(€|e|eur|rp)?$/);
+    if (m) {
+      const cur = m[4] && /€|e|eur/.test(m[4]) ? 'EUR' : (m[1] || m[4] === 'rp') ? 'IDR' : null;
+      if (cur) out.currency = cur;
+      const c = cur || out.currency || defaultCurrency;
+      let v = parseAmount(m[2] + (m[3] || ''), c);
+      if (c === 'IDR' && !m[3] && v < 1000) v *= 1000; // « 35 » à Bali = 35 000 Rp
+      if (tipNext || (out.amount !== undefined && /^\+/.test(raw))) { out.tip = v; tipNext = false; }
+      else if (out.amount === undefined) out.amount = v;
+      else out.tip = v;
+      continue;
+    }
+    words.push(raw);
+  }
+  while (words.length && FILLER.has(deacc(words[words.length - 1]))) words.pop();
+  while (words.length && FILLER.has(deacc(words[0]))) words.shift();
+  const label = words.join(' ');
+  out.label = label ? label.charAt(0).toUpperCase() + label.slice(1) : '';
+  out.cat = guessCat(label, history);
+  if (out.currency === undefined && out.amount !== undefined) out.currency = defaultCurrency;
   return out;
 }
