@@ -7,8 +7,8 @@ export function demoData() {
   const start = addDays(today, -20);
   const now = new Date().toISOString();
   const s = d.settings;
-  s.defaultMonthlyBudget = 880;
-  s.savings = { amount: 21730, date: start };
+  s.defaultMonthlyBudget = 900;
+  s.savings = { amount: 20000, date: start };
   s.tripStart = start; s.tripEnd = addDays(today, 40);
   s.rate = 20000;
   s.cashStart = { date: start, amountIDR: 300000, amountEUR: 50 };
