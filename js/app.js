@@ -3,7 +3,7 @@ import {
   CATS, CAT, DAILY_CATS, DAY_CATS, WEEK_CATS, SUGGESTIONS, DEFAULT_SPLIT, monthSummary, staysCoverage, cashBalance, tripSummary, linesBetween,
   savingsSummary, parseQuick, guessCat,
   localToday, ymOf, addDays, addMonths, diffDays, monthFirst, weekday, parseAmount, toEUR,
-  stayNights, stayNightEUR, groupSum, suggestSplit,
+  stayNights, stayNightEUR, groupSum, suggestSplit, spreadDays,
 } from './engine.js';
 import { store, init, onChange, upsert, remove, setSettings, replaceAll, wipe, syncNow, saveSyncConfig, forgetSync, testConnection, syncConfigured, hasData } from './store.js';
 import { ring, donut, dayBars, burnUp, heatmap, stackBar } from './charts.js';
@@ -378,7 +378,7 @@ function txRow(e, { withDate = false } = {}) {
   const flags = [e.pay === 'cash' ? 'Billets' : 'Carte'];
   if (withDate) flags.unshift(dayShort(e.date));
   if (e.tip) flags.push(`pourboire ${e.currency === 'IDR' ? fmtIDR(e.tip, { exact: true }) : fmtEUR(e.tip)}`);
-  if (e.spread) flags.push(e.spread === 'week' ? 'étalé sur 7 jours' : 'étalé sur 30 jours');
+  if (e.spread) flags.push(`étalé sur ${spreadDays(e)} jours`);
   if (e.offBudget) flags.push('hors budget du mois');
   if (e.src === 'claude') flags.push('via Claude');
   if (e.note) flags.push(esc(e.note));

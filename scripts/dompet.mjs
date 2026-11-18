@@ -57,7 +57,7 @@ if (cmd === 'add') {
     const amount = money(x.amount, currency), tip = money(x.tip || 0, currency) || 0;
     if (!Number.isFinite(amount) || amount <= 0) { console.error('Montant invalide :', JSON.stringify(x)); process.exit(1); }
     if (!CAT[x.cat]) { console.error(`Catégorie inconnue « ${x.cat} ». Choix : ${Object.keys(CAT).join(', ')}`); process.exit(1); }
-    const rate = currency === 'IDR' ? R : undefined;
+    const rate = currency === 'IDR' ? (Number(x.rate) || R) : undefined; // taux du change réel si connu
     const e = upsert('expenses', { date: x.date || today, label: x.label || CAT[x.cat].label, amount, currency, tip, cat: x.cat, pay: x.pay || 'cash', note: x.note || '', rate, ...(x.spread ? { spread: x.spread } : {}), ...(x.offBudget ? { offBudget: true } : {}), eur: Math.round(toEUR(amount + tip, currency, rate || 1) * 100) / 100, src: 'claude' });
     added.push(e);
   }

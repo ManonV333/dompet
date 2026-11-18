@@ -1,5 +1,5 @@
 // Dompet — fonctionne hors ligne : réseau d'abord, cache en secours.
-const CACHE = 'dompet-v3';
+const CACHE = 'dompet-v4';
 const SHELL = ['./', './index.html', './css/app.css', './js/app.js', './js/engine.js', './js/store.js', './js/charts.js', './js/demo.js', './js/icons.js', './icon.svg', './manifest.webmanifest'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });

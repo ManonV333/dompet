@@ -136,11 +136,14 @@ function recurringDates(r, from, to) {
   return out;
 }
 
+// étalement : 'week' = 7 jours, 'month' = 30 jours, ou un nombre de jours (ex. 5)
+export function spreadDays(e) { return e.spread === 'month' ? 30 : e.spread === 'week' ? 7 : Number(e.spread) > 1 ? Math.round(Number(e.spread)) : 1; }
+
 export function linesBetween(data, from, to) {
   const s = data.settings, rate = s.rate;
   const L = [];
   for (const e of data.expenses) {
-    const n = e.spread === 'month' ? 30 : e.spread === 'week' ? 7 : 1;
+    const n = spreadDays(e);
     const last = n > 1 ? addDays(e.date, n - 1) : e.date;
     if (last < from || e.date > to) continue;
     const r = e.currency === 'EUR' ? 1 : (e.rate || rate);
@@ -149,8 +152,8 @@ export function linesBetween(data, from, to) {
       const d = n > 1 ? addDays(e.date, i) : e.date;
       if (d < from || d > to) continue;
       // offBudget : payé d'avance (vol, VPN…) → sort de la cagnotte mais pas du budget du mois
-      L.push({ date: d, eur: base, cat: e.cat, kind: e.offBudget ? 'offbudget' : 'expense', fixed: !!e.offBudget, off: !!e.offBudget, pay: e.pay, label: e.label, ref: e.id, spread: n > 1 });
-      if (tip) L.push({ date: d, eur: tip, cat: 'tips', kind: 'tip', fixed: false, pay: e.pay, label: `Pourboire · ${e.label || ''}`, ref: e.id });
+      L.push({ date: d, eur: base, cat: e.cat, kind: e.offBudget ? 'offbudget' : 'expense', fixed: !!e.offBudget, off: !!e.offBudget, pay: e.pay, label: e.label, ref: e.id, spread: n > 1, srcDate: e.date });
+      if (tip) L.push({ date: d, eur: tip, cat: 'tips', kind: 'tip', fixed: false, pay: e.pay, label: `Pourboire · ${e.label || ''}`, ref: e.id, spread: n > 1, srcDate: e.date });
     }
   }
   for (const st of data.stays) {
@@ -159,7 +162,7 @@ export function linesBetween(data, from, to) {
     for (let i = 0; i < n; i++) {
       const d = addDays(st.checkin, i);
       if (d < from || d > to) continue;
-      L.push({ date: d, eur: per, cat: 'logement', kind: 'stay', fixed: true, pay: 'card', label: st.name, ref: st.id });
+      L.push({ date: d, eur: per, cat: 'logement', kind: 'stay', fixed: true, pay: 'card', label: st.name, ref: st.id, paid: st.paid !== false });
     }
   }
   for (const r of data.recurring) {
@@ -413,7 +416,9 @@ export function savingsSummary(data, today) {
   const spent = sum(lines);
   const days = Math.max(1, diffDays(start, end) + 1);
   const income = (data.income || []).filter(x => x.date >= start && x.date <= end).reduce((a, x) => a + toEUR(x.amount, x.currency, x.currency === 'EUR' ? 1 : (x.rate || s.rate)), 0);
-  const remaining = sv.amount + income - spent;
+  // déjà sorti du compte mais pas encore « vécu » : nuits réservées et payées, achats étalés
+  const paidAhead = sum(linesBetween(data, addDays(end, 1), '2099-12-31').filter(l => (l.kind === 'stay' && l.paid) || (l.spread && l.srcDate <= end)));
+  const remaining = sv.amount + income - spent - paidAhead;
   // rythme réel (≥ 7 jours de données), sinon le budget mensuel
   const budgetDaily = s.defaultMonthlyBudget * 12 / 365;
   const realDaily = days >= 7 ? spent / days : null;
@@ -423,7 +428,7 @@ export function savingsSummary(data, today) {
   // engagements futurs déjà réservés (logements après aujourd'hui)
   const booked = sum(linesBetween(data, addDays(end, 1), '2099-12-31').filter(l => l.kind === 'stay'));
   const scen = [['faible', 690], ['ton budget', s.defaultMonthlyBudget], ['élevé', 990]].map(([k, m]) => ({ key: k, monthly: m, months: remaining / m }));
-  return { amount: sv.amount, income, start, spent, remaining, days, realDaily, budgetDaily, pace, monthsLeft: daysLeft / 30.44, endDate, booked, scenarios: scen, pct: spent / (sv.amount + income) };
+  return { amount: sv.amount, income, start, spent, paidAhead, remaining, days, realDaily, budgetDaily, pace, monthsLeft: daysLeft / 30.44, endDate, booked, scenarios: scen, pct: (spent + paidAhead) / (sv.amount + income) };
 }
 
 // ---------- bilan d'une semaine ----------
